@@ -1,0 +1,11 @@
+services:
+  ai-voice-assistant:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-voice-assistant-demo
+    ports:
+      - "3100:3100"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped

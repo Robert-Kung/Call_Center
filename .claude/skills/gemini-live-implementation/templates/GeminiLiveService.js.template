@@ -1,0 +1,406 @@
+/**
+ * GeminiLiveService - Gemini Live API WebSocket 封裝
+ *
+ * 此服務負責:
+ * 1. 建立與 Gemini Live API 的 WebSocket 連線
+ * 2. 處理音訊串流 (16kHz input → 24kHz output)
+ * 3. 管理會話狀態與 Token 使用量追蹤
+ *
+ * @example
+ * const service = new GeminiLiveService(apiKey);
+ * await service.initialize(scenario);
+ * const response = await service.processAudio(audioBlob);
+ * service.close();
+ */
+
+import { GEMINI_CONFIG, GEMINI_SYSTEM_PROMPTS } from '../config/api';
+
+class GeminiLiveService {
+  constructor(apiKey = GEMINI_CONFIG.apiKey) {
+    this.apiKey = apiKey;
+    this.ws = null;
+    this.sessionId = null;
+    this.isConnected = false;
+
+    // Token 使用量追蹤
+    this.tokenUsage = {
+      input: 0,
+      output: 0,
+      total: 0
+    };
+
+    // 音訊緩衝
+    this.audioBuffer = [];
+    this.textBuffer = '';
+
+    // 回調處理
+    this._onAudioReceived = null;
+    this._onTextReceived = null;
+    this._onError = null;
+
+    // 連線狀態
+    this._connectionPromise = null;
+    this._messageHandlers = new Map();
+  }
+
+  /**
+   * 初始化 Gemini Live 會話
+   * @param {object} scenario - 場景物件 { id, name, systemPrompt?, ... }
+   * @returns {Promise<{ audioBase64, sessionId, latency, aiText }>}
+   */
+  async initialize(scenario) {
+    const startTime = performance.now();
+
+    // 生成 session ID
+    this.sessionId = this._generateSessionId();
+
+    // 建立 WebSocket 連線
+    await this._connect();
+
+    // 發送設定訊息
+    const systemPrompt = scenario.systemPrompt || GEMINI_SYSTEM_PROMPTS[scenario.id] || this._getDefaultPrompt(scenario);
+    await this._sendSetupMessage(systemPrompt);
+
+    // 等待歡迎語音 (Gemini 會在 setup 後自動生成)
+    const welcomeResponse = await this._waitForResponse();
+
+    const latency = Math.round(performance.now() - startTime);
+
+    return {
+      sessionId: this.sessionId,
+      audioBase64: welcomeResponse.audio,
+      aiText: welcomeResponse.text,
+      latency: {
+        total: latency,
+        e2e: latency
+      }
+    };
+  }
+
+  /**
+   * 處理使用者音訊
+   * @param {Blob} audioBlob - 錄製的音訊 Blob
+   * @param {object} scenario - 場景物件
+   * @returns {Promise<{ userText, aiText, audioBase64, latency, tokenUsage }>}
+   */
+  async processAudio(audioBlob, scenario) {
+    if (!this.isConnected || !this.ws) {
+      throw new Error('Gemini Live 未連線，請先呼叫 initialize()');
+    }
+
+    const startTime = performance.now();
+
+    // 將音訊轉換為 base64 PCM
+    const audioBase64 = await this._convertAudioToBase64(audioBlob);
+
+    // 發送音訊資料
+    await this._sendAudioMessage(audioBase64);
+
+    // 等待回應
+    const response = await this._waitForResponse();
+
+    // 更新 Token 使用量
+    if (response.usageMetadata) {
+      this.tokenUsage = {
+        input: response.usageMetadata.promptTokenCount || this.tokenUsage.input,
+        output: response.usageMetadata.candidatesTokenCount || this.tokenUsage.output,
+        total: response.usageMetadata.totalTokenCount || this.tokenUsage.total
+      };
+    }
+
+    const latency = Math.round(performance.now() - startTime);
+
+    return {
+      userText: response.userTranscript || '',
+      aiText: response.text || '',
+      audioBase64: response.audio || '',
+      latency: {
+        total: latency,
+        e2e: latency
+      },
+      tokenUsage: { ...this.tokenUsage }
+    };
+  }
+
+  /**
+   * 關閉連線
+   */
+  close() {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    this.isConnected = false;
+    this.sessionId = null;
+    this.audioBuffer = [];
+    this.textBuffer = '';
+    this._messageHandlers.clear();
+  }
+
+  // ==================== Private Methods ====================
+
+  /**
+   * 建立 WebSocket 連線
+   */
+  async _connect() {
+    return new Promise((resolve, reject) => {
+      const url = `${GEMINI_CONFIG.wsUrl}?key=${this.apiKey}`;
+
+      this.ws = new WebSocket(url);
+
+      this.ws.onopen = () => {
+        console.log('[GeminiLive] WebSocket 已連線');
+        this.isConnected = true;
+        resolve();
+      };
+
+      this.ws.onerror = (error) => {
+        console.error('[GeminiLive] WebSocket 錯誤:', error);
+        this.isConnected = false;
+        reject(new Error('WebSocket 連線失敗'));
+      };
+
+      this.ws.onclose = (event) => {
+        console.log('[GeminiLive] WebSocket 已關閉:', event.code, event.reason);
+        this.isConnected = false;
+      };
+
+      this.ws.onmessage = (event) => {
+        this._handleMessage(event.data);
+      };
+
+      // 連線超時
+      setTimeout(() => {
+        if (!this.isConnected) {
+          this.ws?.close();
+          reject(new Error('WebSocket 連線超時'));
+        }
+      }, 10000);
+    });
+  }
+
+  /**
+   * 發送設定訊息
+   */
+  async _sendSetupMessage(systemPrompt) {
+    const setupMessage = {
+      setup: {
+        model: `models/${GEMINI_CONFIG.model}`,
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: GEMINI_CONFIG.voice.default
+              }
+            }
+          }
+        },
+        systemInstruction: {
+          parts: [{ text: systemPrompt }]
+        }
+      }
+    };
+
+    this._sendMessage(setupMessage);
+
+    // 等待 setup 完成確認
+    return this._waitForSetupComplete();
+  }
+
+  /**
+   * 發送音訊訊息
+   */
+  async _sendAudioMessage(audioBase64) {
+    const message = {
+      realtimeInput: {
+        mediaChunks: [{
+          mimeType: 'audio/pcm;rate=16000',
+          data: audioBase64
+        }]
+      }
+    };
+
+    this._sendMessage(message);
+  }
+
+  /**
+   * 發送訊息
+   */
+  _sendMessage(message) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    } else {
+      throw new Error('WebSocket 未就緒');
+    }
+  }
+
+  /**
+   * 處理接收的訊息
+   */
+  _handleMessage(data) {
+    try {
+      const message = JSON.parse(data);
+
+      // 處理 setup 完成
+      if (message.setupComplete) {
+        this._resolveHandler('setup');
+        return;
+      }
+
+      // 處理伺服器內容
+      if (message.serverContent) {
+        const content = message.serverContent;
+
+        // 收集音訊
+        if (content.modelTurn?.parts) {
+          for (const part of content.modelTurn.parts) {
+            if (part.inlineData?.mimeType?.startsWith('audio/')) {
+              this.audioBuffer.push(part.inlineData.data);
+            }
+            if (part.text) {
+              this.textBuffer += part.text;
+            }
+          }
+        }
+
+        // 回合結束
+        if (content.turnComplete) {
+          const response = {
+            audio: this.audioBuffer.join(''),
+            text: this.textBuffer,
+            userTranscript: content.inputTranscript || '',
+            usageMetadata: message.usageMetadata
+          };
+
+          this.audioBuffer = [];
+          this.textBuffer = '';
+
+          this._resolveHandler('response', response);
+        }
+      }
+
+      // 錯誤處理
+      if (message.error) {
+        this._rejectHandler('response', new Error(message.error.message || 'Gemini API 錯誤'));
+      }
+
+    } catch (err) {
+      console.error('[GeminiLive] 訊息解析錯誤:', err);
+    }
+  }
+
+  /**
+   * 等待 setup 完成
+   */
+  _waitForSetupComplete() {
+    return new Promise((resolve, reject) => {
+      this._messageHandlers.set('setup', { resolve, reject });
+
+      setTimeout(() => {
+        if (this._messageHandlers.has('setup')) {
+          this._messageHandlers.delete('setup');
+          reject(new Error('Setup 超時'));
+        }
+      }, 15000);
+    });
+  }
+
+  /**
+   * 等待回應
+   */
+  _waitForResponse() {
+    return new Promise((resolve, reject) => {
+      this._messageHandlers.set('response', { resolve, reject });
+
+      setTimeout(() => {
+        if (this._messageHandlers.has('response')) {
+          this._messageHandlers.delete('response');
+          reject(new Error('回應超時'));
+        }
+      }, 30000);
+    });
+  }
+
+  /**
+   * 解決處理器
+   */
+  _resolveHandler(type, data = null) {
+    const handler = this._messageHandlers.get(type);
+    if (handler) {
+      this._messageHandlers.delete(type);
+      handler.resolve(data);
+    }
+  }
+
+  /**
+   * 拒絕處理器
+   */
+  _rejectHandler(type, error) {
+    const handler = this._messageHandlers.get(type);
+    if (handler) {
+      this._messageHandlers.delete(type);
+      handler.reject(error);
+    }
+  }
+
+  /**
+   * 將音訊 Blob 轉換為 base64 PCM
+   */
+  async _convertAudioToBase64(audioBlob) {
+    // 如果是 WebM/Opus，需要先解碼再轉換為 PCM
+    const arrayBuffer = await audioBlob.arrayBuffer();
+
+    // 使用 AudioContext 解碼
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 16000
+    });
+
+    try {
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      // 取得單聲道資料
+      const channelData = audioBuffer.getChannelData(0);
+
+      // 轉換為 16-bit PCM
+      const pcmData = new Int16Array(channelData.length);
+      for (let i = 0; i < channelData.length; i++) {
+        const sample = Math.max(-1, Math.min(1, channelData[i]));
+        pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+      }
+
+      // 轉換為 base64
+      const uint8Array = new Uint8Array(pcmData.buffer);
+      let binary = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
+      }
+
+      return btoa(binary);
+    } finally {
+      await audioContext.close();
+    }
+  }
+
+  /**
+   * 生成 Session ID
+   */
+  _generateSessionId() {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 9);
+    return `gemini-${timestamp}-${random}`;
+  }
+
+  /**
+   * 取得預設系統提示
+   */
+  _getDefaultPrompt(scenario) {
+    return `你是${scenario.companyInfo?.name || scenario.name}的AI客服助理。
+請用繁體中文、親切專業的語氣回答客戶問題。
+回答請簡潔，每次回覆控制在50字以內。`;
+  }
+}
+
+// 導出單例
+export const geminiLiveService = new GeminiLiveService();
+export default GeminiLiveService;

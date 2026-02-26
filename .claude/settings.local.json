@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker logs ai-voice-assistant-demo)",
+      "Bash(test:*)",
+      "Bash(docker logs:*)"
+    ],
+    "additionalDirectories": [
+      "/home/user/Call_Center /src/views"
+    ]
+  }
+}
