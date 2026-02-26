@@ -10,7 +10,7 @@
 
 | Phase | 名稱 | 狀態 | 預計 | 實際 |
 |-------|------|------|------|------|
-| 0 | 文件清理 | 📋 待開始 | 0.5 天 | - |
+| 0 | 文件清理 | ✅ 已完成 | 0.5 天 | 0.5 天 |
 | 1 | UI 佈局修正 | 📋 待開始 | 1 天 | - |
 | 2 | 四視角模式感知 | 📋 待開始 | 2 天 | - |
 | 3 | Live 模式意圖分析與單據 | 📋 待開始 | 3-5 天 | - |
@@ -21,15 +21,15 @@
 ## 詳細記錄
 
 ### Phase 0: 文件清理
-**狀態**: 📋 待開始  
-**預計**: 0.5 天 | **實際**: -
+**狀態**: ✅ 2026-02-26 完成  
+**預計**: 0.5 天 | **實際**: 0.5 天
 
 | # | 任務 | 狀態 | 完成日期 | 備註 |
 |---|------|------|----------|------|
-| 0-1 | 更新 README.md | 📋 | - | Gemini Live 改為已完成；更新專案結構 |
-| 0-2 | 更新 STRUCTURE.md | 📋 | - | 加入缺少的檔案 |
-| 0-3 | 歸檔 GEMINI_LIVE_IMPLEMENTATION_PLAN.md | 📋 | - | 加上已完成標記 |
-| 0-4 | 更新 copilot-instructions.md | 📋 | - | 補上 Gemini Live 相關內容 |
+| 0-1 | 更新 README.md | ✅ | 2026-02-26 | 移除「規劃中」、補充 ModeSwitch/GeminiLivePanel/GeminiLiveService/SessionLogger/docker-compose.dev.yml |
+| 0-2 | 更新 STRUCTURE.md | ✅ | 2026-02-26 | 加入 SessionLogger.js、data/、docker-compose.dev.yml |
+| 0-3 | 歸檔 GEMINI_LIVE_IMPLEMENTATION_PLAN.md | ✅ | 2026-02-26 | 頂部加上「✅ 已完成」標記 |
+| 0-4 | 更新 copilot-instructions.md | ✅ | 2026-02-26 | 完整重寫，補入三模式架構、Gemini Live、SessionLogger、ModeSwitch、dev workflows |
 
 ---
 
@@ -91,3 +91,4 @@
 | 日期 | 事項 |
 |------|------|
 | 2026-02-26 | 建立任務規劃、Skill 規範、進度追蹤文件 |
+| 2026-02-26 | ✅ Phase 0 完成：更新 README、STRUCTURE、GEMINI_LIVE_IMPLEMENTATION_PLAN、copilot-instructions |

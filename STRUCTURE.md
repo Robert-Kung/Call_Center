@@ -22,7 +22,8 @@ Call_Center/
 │  │  ├─ services/
 │  │  │  ├─ VoiceService.js          # 語音服務封裝（REST + Gemini）
 │  │  │  ├─ ApiClient.js             # HTTP 客戶端（REST Live 用）
-│  │  │  └─ GeminiLiveService.js     # Gemini Live WebSocket 服務
+│  │  │  ├─ GeminiLiveService.js     # Gemini Live WebSocket 服務
+│  │  │  └─ SessionLogger.js         # 通話 Session 記錄器（本地 JSON）
 │  │  ├─ hooks/
 │  │  │  ├─ useAudioRecorder.js      # 錄音 Hook（16kHz mono）
 │  │  │  └─ useAudioPlayer.js        # 播放 Hook（佇列式 base64 播放）
@@ -68,6 +69,10 @@ Call_Center/
 │     ├─ README.md                   # 舊版說明
 │     └─ call-center-demo.jsx        # 原型單檔案版本
 │
+├─ 🗄️ 通話記錄
+│  └─ data/                          # Session 記錄（本地，不上傳 git）
+│     └─ session-*.json              # 各次 Gemini Live 通話記錄
+│
 ├─ ⚙️ 配置與部署
 │  ├─ .github/
 │  │  └─ copilot-instructions.md     # GitHub Copilot 編程指引
@@ -83,7 +88,8 @@ Call_Center/
 │  │        ├─ data/                 # 設計資料庫 (CSV)
 │  │        └─ scripts/              # 搜尋腳本 (Python)
 │  ├─ Dockerfile                     # 容器映像檔
-│  └─ docker-compose.yml             # 容器編排
+│  ├─ docker-compose.yml             # 容器編排（生產）
+│  └─ docker-compose.dev.yml         # 容器編排（開發/hot reload）
 ```
 
 ## 目錄說明

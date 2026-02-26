@@ -1,8 +1,11 @@
 # Gemini Live 整合實作規劃
 
+> ✅ **已完成** — 2026-02 實作完畢。此文件保留作為歷史規劃記錄。  
+> 當前功能狀態請參閱 [TASK_PLAN.md](TASK_PLAN.md) 與 [PROGRESS.md](PROGRESS.md)。
+
 **目標**：在現有架構基礎上新增 Gemini Live 模式，實現三模式並行驗證（Mock → REST Live → Gemini Live）
 
-**時間估計**：2-3 週  
+**時間估計**：2-3 週 ✅ 已完成  
 **風險等級**：中等（WebSocket 新增，但不影響現有功能）
 
 ---

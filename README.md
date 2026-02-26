@@ -36,7 +36,7 @@
 │      (瀏覽器 → 後端 → 外部 API)              ├─ LLM (GPT/Claude)
 │                                             └─ TTS (Voice API)
 │
-└─► 【Gemini Live 模式】(規劃中)
+└─► 【Gemini Live 模式】✅
     └─ 端到端即時語音 ──────────────────►   Gemini API
        (瀏覽器 ←→ WebSocket ←→ Google)        (WebSocket)
 ```
@@ -128,12 +128,18 @@ Call_Center/
 │  │  ├─ PhoneSimulator.jsx      # 手機模擬器
 │  │  ├─ ConversationPanel.jsx   # 對話面板
 │  │  ├─ AnalysisPanel.jsx       # 意圖分析
-│  │  └─ LatencyMonitor.jsx      # 延遲監控
+│  │  ├─ LatencyMonitor.jsx      # 延遲監控
+│  │  ├─ ModeSwitch.jsx          # 三模式切換器
+│  │  ├─ GeminiLivePanel.jsx     # Gemini Live 監控面板
+│  │  ├─ TicketPanel.jsx         # 工單顯示
+│  │  └─ SystemLogPanel.jsx      # 系統日誌
 │  ├─ context/
-│  │  └─ CallContext.jsx         # 全域狀態管理
+│  │  └─ CallContext.jsx         # 全域狀態管理（三模式分流）
 │  ├─ services/
-│  │  ├─ VoiceService.js         # 語音服務封裝
-│  │  └─ ApiClient.js            # HTTP 客戶端
+│  │  ├─ VoiceService.js         # 語音服務封裝（REST + Gemini）
+│  │  ├─ ApiClient.js            # HTTP 客戶端
+│  │  ├─ GeminiLiveService.js    # Gemini Live WebSocket 服務
+│  │  └─ SessionLogger.js        # 通話 Session 記錄器
 │  ├─ data/
 │  │  └─ scenarios.js            # Mock 對話腳本
 │  ├─ config/
@@ -167,7 +173,8 @@ Call_Center/
 ├─ package.json                  # 前端依賴
 ├─ vite.config.js                # Vite 配置
 ├─ tailwind.config.js            # Tailwind CSS 配置
-└─ docker-compose.yml            # Docker 配置
+├─ docker-compose.yml            # Docker 配置（生產）
+└─ docker-compose.dev.yml        # Docker 配置（開發/hot reload）
 ```
 
 ---
@@ -190,7 +197,7 @@ Call_Center/
   - 支援 Session 管理
 - **適合**：需要自定義業務邏輯的正式環境
 
-### 3️⃣ Gemini Live 模式（規劃中）
+### 3️⃣ Gemini Live 模式 ✅
 
 - **用途**：超低延遲展示、成本優化
 - **流程**：Audio ←→ Gemini API (WebSocket) ←→ Audio
@@ -198,6 +205,7 @@ Call_Center/
   - 端到端處理（300-600ms）
   - 原生繁體中文支援
   - Token 使用量追蹤
+  - 即時串流（無需 PTT，直接說話）
 - **適合**：追求極致延遲體驗的場景
 
 ---
