@@ -13,7 +13,7 @@
 | 0 | 文件清理 | ✅ 已完成 | 0.5 天 | 0.5 天 |
 | 1 | UI 佈局修正 | ✅ 已完成 | 1 天 | 0.5 天 |
 | 2 | 四視角模式感知 | ✅ 已完成 | 2 天 | 0.5 天 |
-| 3 | Live 模式意圖分析與單據 | 📋 待開始 | 3-5 天 | - |
+| 3 | Live 模式意圖分析與單據 | ✅ 已完成 | 3-5 天 | 1 天 |
 | 4 | 整合測試與優化 | 📋 待開始 | 1 天 | - |
 
 ---
@@ -59,17 +59,25 @@
 ---
 
 ### Phase 3: Live 模式意圖分析與單據產生
-**狀態**: 📋 待開始  
-**預計**: 3-5 天 | **實際**: -
+**狀態**: ✅ 2026-03-02 完成  
+**預計**: 3-5 天 | **實際**: 1 天  
+**採用方案**: 方案 A（Gemini 原生 function calling + audio 共存）
 
 | # | 任務 | 狀態 | 完成日期 | 備註 |
 |---|------|------|----------|------|
-| 3-1 | 驗證 Gemini Function Calling + Audio | 📋 | - | 高風險項目 |
-| 3-2 | 定義 Tool Schema | 📋 | - | |
-| 3-3 | 修改 System Prompt | 📋 | - | |
-| 3-4 | GeminiLiveService 處理 Tool Call | 📋 | - | |
-| 3-5 | CallContext 接收分析/單據 | 📋 | - | |
-| 3-6 | fallback: 文字分析 API（若需要）| 📋 | - | |
+| 3-1 | 驗證 Gemini Function Calling + Audio | ✅ | 2026-03-02 | 官方文件確認支援；實際測試 analyze_intent 成功觸發 |
+| 3-2 | 定義 Tool Schema | ✅ | 2026-03-02 | `GEMINI_TOOL_DECLARATIONS`: analyze_intent + create_ticket，含 enum、examples |
+| 3-3 | 修改 System Prompt | ✅ | 2026-03-02 | 三場景 prompt 加入【工具使用規則】，含實體擷取格式範例 |
+| 3-4 | GeminiLiveService 處理 Tool Call | ✅ | 2026-03-02 | toolCall 頂層路徑 + fallback modelTurn.parts；NON_BLOCKING + scheduling |
+| 3-5 | CallContext 接收分析/單據 | ✅ | 2026-03-02 | onToolCall 回傳實際結果；uid() 唯一 ID 避免 duplicate key |
+| 3-6 | fallback: 文字分析 API | ⏭️ | - | 不需要 — 方案 A 原生 function calling 已驗證可行 |
+
+**技術細節**:
+- 對齊官方 Live API 格式: toolCall 頂層訊息 + toolResponse.functionResponses[{id, name, response}]
+- analyze_intent 設為 NON_BLOCKING + scheduling: WHEN_IDLE，不阻塞語音串流
+- create_ticket 設為 scheduling: INTERRUPT，建單後立即通知
+- SessionLogger 記錄 function_call + function_response 事件
+- CallContext onToolCall 回傳結構化結果（分析摘要/單據 ID）供 Gemini 後續參考
 
 ---
 
@@ -94,3 +102,4 @@
 | 2026-02-26 | ✅ Phase 0 完成：更新 README、STRUCTURE、GEMINI_LIVE_IMPLEMENTATION_PLAN、copilot-instructions |
 | 2026-03-02 | ✅ Phase 1 完成：ModeSwitch 統一至 App header（compact）、移除 ConsumerView 獨立 ModeSwitch |
 | 2026-03-02 | ✅ Phase 2 完成：AgentView PTT/串流、SystemView 動態 pipeline+Gemini 統計、PhoneSimulator 模式 badge |
+| 2026-03-02 | ✅ Phase 3 完成：Gemini Function Calling 驗證+實作，analyze_intent+create_ticket 工具，NON_BLOCKING 非同步，uid() 唯一 ID |

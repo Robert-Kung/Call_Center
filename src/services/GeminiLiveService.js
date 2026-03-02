@@ -11,7 +11,7 @@
  *   initialize(scenario) → startStreaming(mediaStream) → [callback driven] → stopStreaming() → close()
  */
 
-import { GEMINI_CONFIG, GEMINI_SYSTEM_PROMPTS, WELCOME_MESSAGES } from '../config/api';
+import { GEMINI_CONFIG, GEMINI_SYSTEM_PROMPTS, WELCOME_MESSAGES, GEMINI_TOOL_DECLARATIONS } from '../config/api';
 import { sessionLogger } from './SessionLogger';
 
 class GeminiLiveService {
@@ -46,6 +46,7 @@ class GeminiLiveService {
     this.onInterrupted = null;        // () => void
     this.onError = null;              // (error) => void
     this.onConnectionChange = null;   // (status) => void
+    this.onToolCall = null;           // ({ name, args }) => void  (Function Calling 回調)
 
     // Promise-based handler (用於 initialize 的歡迎語)
     this._messageHandlers = new Map();
@@ -410,10 +411,20 @@ class GeminiLiveService {
         systemInstruction: {
           parts: [{ text: systemPrompt }]
         },
+        // Function Calling — tools 必須放在 setup 頂層（與 generationConfig 同級）
+        // 官方格式: tools: [{ functionDeclarations: [...] }]
+        // analyze_intent 設為 NON_BLOCKING，避免阻塞音訊輸出
+        tools: [{
+          functionDeclarations: GEMINI_TOOL_DECLARATIONS.map(decl => ({
+            ...decl,
+            ...(decl.name === 'analyze_intent' ? { behavior: 'NON_BLOCKING' } : {})
+          }))
+        }],
         outputAudioTranscription: {},
         inputAudioTranscription: {}
       }
     };
+    console.log('[GeminiLive] Setup 包含 %d 個 tool declarations', GEMINI_TOOL_DECLARATIONS.length);
     this._sendMessage(setupMessage);
     return this._waitForSetupComplete();
   }
@@ -483,6 +494,12 @@ class GeminiLiveService {
             }
             if (part.text) {
               this.textBuffer += part.text;
+            }
+            // [Fallback] Live API 的 function call 正常是在頂層 toolCall 訊息
+            // 但某些情境下可能出現在 modelTurn.parts，防禦性處理
+            if (part.functionCall) {
+              console.log('[GeminiLive] ⚠ functionCall 出現在 modelTurn.parts (非標準 Live API 路徑)');
+              this._handleFunctionCall(part.functionCall);
             }
           }
         }
@@ -578,9 +595,70 @@ class GeminiLiveService {
         if (this.onError) this.onError(err);
       }
 
+      // [Primary] Live API 的 Function Calling — toolCall 是獨立的頂層訊息類型
+      // 官方格式: { toolCall: { functionCalls: [{ id, name, args }] } }
+      if (message.toolCall) {
+        const calls = message.toolCall.functionCalls || [];
+        console.log('[GeminiLive] 🔧 收到 toolCall，共 %d 個 function calls', calls.length);
+        for (const fc of calls) {
+          this._handleFunctionCall(fc);
+        }
+      }
+
     } catch (err) {
       console.error('[GeminiLive] ✗ 訊息解析錯誤:', err);
     }
+  }
+
+  // ==================== Private: Function Calling ====================
+
+  /**
+   * 處理 Gemini 發出的 function call
+   */
+  _handleFunctionCall(functionCall) {
+    const { name, id, args } = functionCall;
+    console.log('[GeminiLive] 🔧 Function Call:', name, 'id:', id, 'args:', JSON.stringify(args));
+
+    sessionLogger.log('function_call', { name, id, args });
+
+    // 通知外部（CallContext）並取得執行結果
+    // onToolCall 應回傳 result 物件，供 Gemini 了解函式執行結果
+    let result = { result: 'ok' };
+    if (this.onToolCall) {
+      try {
+        const callbackResult = this.onToolCall({ name, args, id });
+        if (callbackResult && typeof callbackResult === 'object') {
+          result = callbackResult;
+        }
+      } catch (err) {
+        console.error('[GeminiLive] ✗ onToolCall 執行錯誤:', err);
+        result = { result: 'error', error: err.message };
+      }
+    }
+
+    // 回傳 functionResponse 給 Gemini（含實際執行結果）
+    // 官方格式: { toolResponse: { functionResponses: [{ id, name, response }] } }
+    // analyze_intent 用 WHEN_IDLE（不打斷）; create_ticket 用 INTERRUPT（立即回報）
+    const scheduling = name === 'analyze_intent' ? 'WHEN_IDLE' : 'INTERRUPT';
+    this._sendFunctionResponse(name, id, { ...result, scheduling });
+  }
+
+  /**
+   * 回傳 functionResponse 給 Gemini
+   */
+  _sendFunctionResponse(functionName, callId, result) {
+    const message = {
+      toolResponse: {
+        functionResponses: [{
+          name: functionName,
+          id: callId,
+          response: result
+        }]
+      }
+    };
+    console.log('[GeminiLive] >>> toolResponse:', functionName, 'result:', JSON.stringify(result).substring(0, 100));
+    sessionLogger.log('function_response', { name: functionName, id: callId, result });
+    this._sendMessage(message);
   }
 
   // ==================== Private: Helpers ====================

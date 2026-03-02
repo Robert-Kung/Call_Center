@@ -7,6 +7,10 @@ import { useAudioPlayer } from '../hooks/useAudioPlayer';
 
 const CallContext = createContext(null);
 
+// 唯一遞增 ID 生成器 — 避免 Date.now() 在快速連續呼叫時產生重複 key
+let _uidCounter = 0;
+const uid = () => `${Date.now()}-${++_uidCounter}`;
+
 export function CallProvider({ children }) {
   // 核心狀態
   const [selectedScenarioId, setSelectedScenarioId] = useState(null);
@@ -77,7 +81,7 @@ export function CallProvider({ children }) {
   // 新增系統 Log
   const addLog = useCallback((message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString('zh-TW');
-    setSystemLogs(prev => [...prev, { timestamp, message, type, id: Date.now() }]);
+    setSystemLogs(prev => [...prev, { timestamp, message, type, id: uid() }]);
   }, []);
 
   // 模擬延遲指標 (Mock 模式用)
@@ -199,7 +203,7 @@ export function CallProvider({ children }) {
       // 加入 AI 歡迎語到對話
       if (response.ai_text) {
         setDisplayedConversations([{
-          id: Date.now(),
+          id: uid(),
           speaker: 'ai',
           text: response.ai_text
         }]);
@@ -267,7 +271,7 @@ export function CallProvider({ children }) {
         // 加入使用者語音轉文字
         if (response.userText && response.userText.trim()) {
           setDisplayedConversations(prev => [...prev, {
-            id: Date.now(),
+            id: uid(),
             speaker: 'customer',
             text: response.userText
           }]);
@@ -277,7 +281,7 @@ export function CallProvider({ children }) {
         // 加入 AI 回應
         if (response.aiText && response.aiText.trim()) {
           setDisplayedConversations(prev => [...prev, {
-            id: Date.now() + 1,
+            id: uid(),
             speaker: 'ai',
             text: response.aiText
           }]);
@@ -334,6 +338,81 @@ export function CallProvider({ children }) {
         }
       };
 
+      // Function Calling 回調 — 處理意圖分析和單據建立
+      // 必須回傳 result 物件，供 GeminiLiveService 回傳給 Gemini
+      geminiService.onToolCall = ({ name, args, id }) => {
+        console.log('[CallContext] 🔧 Tool Call:', name, 'id:', id, args);
+
+        if (name === 'analyze_intent') {
+          // 更新 AI 意圖分析面板
+          const analysis = {
+            intent: args.intent || '未知',
+            confidence: args.confidence || 0,
+            entities: args.entities || [],
+            flags: args.flags || [],
+            flagTypes: args.flagTypes || []
+          };
+          setCurrentAnalysis(analysis);
+          addLog(`🔍 意圖分析: ${analysis.intent} (${(analysis.confidence * 100).toFixed(0)}%)`, 'ai');
+          if (analysis.entities.length > 0) {
+            addLog(`  實體: ${analysis.entities.join(', ')}`, 'info');
+          }
+          if (analysis.flags && analysis.flags.length > 0) {
+            analysis.flags.forEach((flag, idx) => {
+              const flagType = analysis.flagTypes?.[idx] || 'warning';
+              addLog(`  標記: ${flag}`, flagType);
+            });
+          }
+          // 回傳結果給 Gemini
+          return {
+            result: 'success',
+            analysis: {
+              intent: analysis.intent,
+              confidence: analysis.confidence,
+              entityCount: analysis.entities.length,
+              flagCount: analysis.flags.length
+            }
+          };
+        }
+
+        if (name === 'create_ticket') {
+          // 解析 details 欄位（可能是 JSON 字串）
+          let parsedDetails = {};
+          if (args.details) {
+            try {
+              parsedDetails = typeof args.details === 'string' ? JSON.parse(args.details) : args.details;
+            } catch {
+              parsedDetails = { raw: args.details };
+            }
+          }
+
+          const ticket = {
+            id: uid(),
+            type: args.type || '服務單',
+            ticketId: args.ticketId || `TKT-${Date.now()}`,
+            summary: args.summary || '',
+            customerName: args.customerName || '',
+            contactPhone: args.contactPhone || '',
+            priority: args.priority || '一般',
+            status: args.status || '已建立',
+            ...parsedDetails
+          };
+          setTickets(prev => [...prev, ticket]);
+          addLog(`✓ ${ticket.type}已建立: ${ticket.ticketId}`, 'success');
+          // 回傳結果給 Gemini
+          return {
+            result: 'success',
+            ticketId: ticket.ticketId,
+            type: ticket.type,
+            status: ticket.status
+          };
+        }
+
+        // 未知的 function — 仍回傳結果避免 Gemini 卡住
+        console.warn('[CallContext] 未知的 tool call:', name);
+        return { result: 'error', error: `Unknown function: ${name}` };
+      };
+
       // 初始化 (連線 + setup + 歡迎語)
       const response = await voiceServiceRef.current.initializeCallGeminiLive(scenario);
 
@@ -364,7 +443,7 @@ export function CallProvider({ children }) {
       // 加入 AI 歡迎語到對話
       if (response.ai_text) {
         setDisplayedConversations([{
-          id: Date.now(),
+          id: uid(),
           speaker: 'ai',
           text: response.ai_text
         }]);
@@ -433,7 +512,7 @@ export function CallProvider({ children }) {
       // 加入使用者語音轉文字
       if (response.user_text && response.user_text.trim()) {
         setDisplayedConversations(prev => [...prev, {
-          id: Date.now(),
+          id: uid(),
           speaker: 'customer',
           text: response.user_text
         }]);
@@ -443,7 +522,7 @@ export function CallProvider({ children }) {
       // 加入 AI 回應
       if (response.ai_text) {
         setDisplayedConversations(prev => [...prev, {
-          id: Date.now() + 1,
+          id: uid(),
           speaker: 'ai',
           text: response.ai_text
         }]);
@@ -528,6 +607,7 @@ export function CallProvider({ children }) {
         geminiService.onInterrupted = null;
         geminiService.onError = null;
         geminiService.onConnectionChange = null;
+        geminiService.onToolCall = null;
 
         voiceServiceRef.current.endGeminiSession();
         setGeminiConnectionStatus('disconnected');
@@ -570,7 +650,7 @@ export function CallProvider({ children }) {
 
     const conv = scenario.conversations[nextIndex];
     setConversationIndex(nextIndex);
-    setDisplayedConversations(prev => [...prev, { ...conv, id: Date.now() }]);
+    setDisplayedConversations(prev => [...prev, { ...conv, id: uid() }]);
 
     // 模擬延遲
     simulateLatency();
@@ -681,7 +761,7 @@ export function CallProvider({ children }) {
         addLog(`提供資訊: ${action.category}`, 'info');
         break;
       case 'ticket_created':
-        setTickets(prev => [...prev, { ...action.ticket, id: Date.now() }]);
+        setTickets(prev => [...prev, { ...action.ticket, id: uid() }]);
         addLog(`✓ ${action.ticket.type}已建立: ${action.ticket.ticketId}`, 'success');
         break;
       case 'call_end':
@@ -720,6 +800,7 @@ export function CallProvider({ children }) {
         geminiService.onInterrupted = null;
         geminiService.onError = null;
         geminiService.onConnectionChange = null;
+        geminiService.onToolCall = null;
         voiceServiceRef.current.endGeminiSession();
         setGeminiConnectionStatus('disconnected');
       } else if (voiceMode === 'rest-live') {
