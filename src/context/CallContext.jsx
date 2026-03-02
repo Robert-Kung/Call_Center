@@ -131,6 +131,7 @@ export function CallProvider({ children }) {
     setGeminiConnectionStatus('disconnected');
     setGeminiTokenUsage({ input: 0, output: 0, total: 0 });
     setIsStreaming(false);
+    setIsProcessing(false);
     setError(null);
   }, []);
 
@@ -819,7 +820,10 @@ export function CallProvider({ children }) {
     setIsMuted(false);
     setLatencyMetrics({ asr: 0, llm: 0, tts: 0, total: 0 });
     setSessionId(null);
+    setIsStreaming(false);
+    setIsProcessing(false);
     setConnectionStatus('disconnected');
+    setGeminiConnectionStatus('disconnected');
     setGeminiTokenUsage({ input: 0, output: 0, total: 0 });
     setError(null);
   }, [voiceMode, sessionId, isStreaming]);

@@ -264,6 +264,8 @@ TTS_API_URL=http://your-tts-endpoint
 
 - [系統架構說明](docs/ai-voice-assistant-architecture.md)
 - [API 規格書](docs/api-specification.md)
+- [任務規劃](docs/TASK_PLAN.md)
+- [開發進度](docs/PROGRESS.md)
 - [Gemini Live 實作規劃](docs/GEMINI_LIVE_IMPLEMENTATION_PLAN.md)
 - [AI 編程指引](.github/copilot-instructions.md)
 

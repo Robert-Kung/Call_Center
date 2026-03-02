@@ -10,10 +10,11 @@
 ## Architecture & data flow
 - `CallContext` is the state hub for call lifecycle, mode (`voiceMode`), logs, latency, transcripts, tickets, and analysis. Start at [src/context/CallContext.jsx](src/context/CallContext.jsx).
 - `voiceMode` values: `'mock'` | `'rest-live'` | `'gemini-live'`. All branching logic should use this.
-- `ModeSwitch` component ([src/components/ModeSwitch.jsx](src/components/ModeSwitch.jsx)) handles UI for switching modes; currently rendered in `ConsumerView` — being migrated to App.jsx header (Phase 1).
+- `ModeSwitch` component ([src/components/ModeSwitch.jsx](src/components/ModeSwitch.jsx)) handles UI for switching modes; rendered in App.jsx header as `HeaderModeSwitch` (compact mode, disabled during calls).
 - REST Live: `VoiceService` → `ApiClient` → `/webhook/talk` (init uses `text_input: START_CALL_TRIGGER`; turns use `FormData` with `file`, `session_id`, `voice_id`). See [src/services/VoiceService.js](src/services/VoiceService.js) and [src/services/ApiClient.js](src/services/ApiClient.js).
-- Gemini Live: `VoiceService` → `GeminiLiveService` ([src/services/GeminiLiveService.js](src/services/GeminiLiveService.js)) opens a `BidiGenerateContent` WebSocket, streams mic audio, receives PCM audio + transcript via callbacks.
-- `SessionLogger` ([src/services/SessionLogger.js](src/services/SessionLogger.js)) records Gemini Live sessions to `data/session-*.json` for debugging.
+- Gemini Live: `VoiceService` → `GeminiLiveService` ([src/services/GeminiLiveService.js](src/services/GeminiLiveService.js)) opens a `BidiGenerateContent` WebSocket, streams mic audio, receives PCM audio + transcript via callbacks. Also handles `toolCall` messages for function calling.
+- Gemini Live Function Calling: `GEMINI_TOOL_DECLARATIONS` in [src/config/api.js](src/config/api.js) defines two tools — `analyze_intent` (NON_BLOCKING, WHEN_IDLE) and `create_ticket` (INTERRUPT). `CallContext.onToolCall` processes results and updates `currentAnalysis` / `tickets` state.
+- `SessionLogger` ([src/services/SessionLogger.js](src/services/SessionLogger.js)) records Gemini Live sessions (including `function_call` and `function_response` events) to `data/session-*.json` for debugging.
 - Mock mode replays scripted scenarios from [src/data/scenarios.js](src/data/scenarios.js) without backend traffic. Tickets and analysis come from scenario `action` fields.
 - Audio capture/playback lives in [src/hooks/useAudioRecorder.js](src/hooks/useAudioRecorder.js) and [src/hooks/useAudioPlayer.js](src/hooks/useAudioPlayer.js); keep 16kHz mono settings aligned with backend expectations.
 
@@ -32,4 +33,5 @@
 - Scenario content and prompts must stay in sync: update [src/data/scenarios.js](src/data/scenarios.js) and [src/config/api.js](src/config/api.js) together.
 - API responses are expected to include `latency` metrics for dashboard visualization.
 - Gemini config (model, voice, audio format, latency thresholds) lives in `GEMINI_CONFIG` in [src/config/api.js](src/config/api.js).
+- Gemini tool declarations (function schema with enums, examples) live in `GEMINI_TOOL_DECLARATIONS` in [src/config/api.js](src/config/api.js) — update alongside `SCENARIO_PROMPTS` when changing tools.
 - Three-mode compatibility rule: never break Mock or REST Live when adding Gemini Live features; use `voiceMode` guards.

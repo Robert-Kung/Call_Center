@@ -51,21 +51,21 @@ export default function App() {
     <CallProvider>
       <div className="h-screen flex flex-col bg-slate-900">
         {/* 頂部導航列 */}
-        <header className="bg-slate-800 border-b border-slate-700 px-6 py-3 flex-shrink-0">
-          <div className="flex items-center justify-between">
+        <header className="bg-slate-800 border-b border-slate-700 px-6 py-3 flex-shrink-0 min-w-0">
+          <div className="flex items-center gap-4 min-w-0">
             {/* Logo 與標題 */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-shrink-0">
               <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
                 <Phone className="w-5 h-5 text-white" />
               </div>
-              <div>
+              <div className="hidden lg:block">
                 <h1 className="text-lg font-bold text-white">AI 語音客服助理</h1>
                 <p className="text-xs text-slate-400">智能語音對話系統展示平台</p>
               </div>
             </div>
 
-            {/* 視角切換 */}
-            <nav className="flex items-center gap-1 bg-slate-900/50 rounded-xl p-1">
+            {/* 視角切換 (flex-1 讓 nav 填充中間，兩側固定不壓縮) */}
+            <nav className="flex flex-1 justify-center items-center gap-1 bg-slate-900/50 rounded-xl p-1 min-w-0 overflow-x-auto">
               {viewConfig.map((view) => {
                 const Icon = view.icon;
                 const isActive = currentView === view.id;
@@ -73,21 +73,22 @@ export default function App() {
                   <button
                     key={view.id}
                     onClick={() => setCurrentView(view.id)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all cursor-pointer ${
+                    className={`flex items-center gap-2 px-3 xl:px-4 py-2 rounded-lg transition-all cursor-pointer flex-shrink-0 ${
                       isActive
                         ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20'
                         : 'text-slate-400 hover:text-white hover:bg-slate-700'
                     }`}
+                    title={view.description}
                   >
                     <Icon className="w-4 h-4" />
-                    <span className="text-sm font-medium">{view.label}</span>
+                    <span className="text-sm font-medium hidden xl:inline">{view.label}</span>
                   </button>
                 );
               })}
             </nav>
 
             {/* 右側 - 模式切換 + 狀態 */}
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-shrink-0">
               <HeaderModeSwitch />
               <div className="w-px h-8 bg-slate-700" />
               <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" title="系統運行中" />

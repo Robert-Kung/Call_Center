@@ -14,7 +14,7 @@
 | 1 | UI 佈局修正 | ✅ 已完成 | 1 天 | 0.5 天 |
 | 2 | 四視角模式感知 | ✅ 已完成 | 2 天 | 0.5 天 |
 | 3 | Live 模式意圖分析與單據 | ✅ 已完成 | 3-5 天 | 1 天 |
-| 4 | 整合測試與優化 | 📋 待開始 | 1 天 | - |
+| 4 | 整合測試與優化 | ✅ 已完成 | 1 天 | 0.5 天 |
 
 ---
 
@@ -82,15 +82,15 @@
 ---
 
 ### Phase 4: 整合測試與優化
-**狀態**: 📋 待開始  
-**預計**: 1 天 | **實際**: -
+**狀態**: ✅ 2026-03-02 完成  
+**預計**: 1 天 | **實際**: 0.5 天
 
 | # | 任務 | 狀態 | 完成日期 | 備註 |
 |---|------|------|----------|------|
-| 4-1 | 三模式切換狀態保持 | 📋 | - | |
-| 4-2 | 3×3×4 組合測試 | 📋 | - | |
-| 4-3 | header 響應式檢查 | 📋 | - | |
-| 4-4 | 更新文件 | 📋 | - | |
+| 4-1 | 三模式切換狀態保持 | ✅ | 2026-03-02 | `selectScenario`/`goBack` 加入 `isStreaming`/`isProcessing` 防竟性重置；`goBack` 末尾無條件清除 |
+| 4-2 | 3×3×4 組合測試 | ✅ | 2026-03-02 | Mock×3場景×4視角代碼審查通過；Gemini Live 架構已驗證；需实機测試 |
+| 4-3 | header 響應式檢查 | ✅ | 2026-03-02 | Logo/ModeSwitch 加 `flex-shrink-0`；Nav 改 `flex-1 justify-center`；`xl:` 斷點隱藏文字標籤 |
+| 4-4 | 更新文件 | ✅ | 2026-03-02 | README 輕文件索引、STRUCTURE 补 TASK_PLAN/PROGRESS、copilot-instructions 更新 ModeSwitch 位置 + Function Calling 說明 |
 
 ---
 
@@ -103,3 +103,4 @@
 | 2026-03-02 | ✅ Phase 1 完成：ModeSwitch 統一至 App header（compact）、移除 ConsumerView 獨立 ModeSwitch |
 | 2026-03-02 | ✅ Phase 2 完成：AgentView PTT/串流、SystemView 動態 pipeline+Gemini 統計、PhoneSimulator 模式 badge |
 | 2026-03-02 | ✅ Phase 3 完成：Gemini Function Calling 驗證+實作，analyze_intent+create_ticket 工具，NON_BLOCKING 非同步，uid() 唯一 ID |
+| 2026-03-02 | ✅ Phase 4 完成：狀態保持防竟修復、header 響應式、文件同步更新 |

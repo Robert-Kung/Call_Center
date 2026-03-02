@@ -59,9 +59,11 @@ Call_Center/
 ├─ 📚 文件
 │  ├─ docs/
 │  │  ├─ README.md                   # 文件索引
+│  │  ├─ TASK_PLAN.md                # 任務規劃（Phase 0-4 定義）
+│  │  ├─ PROGRESS.md                 # 開發進度追蹤（每日更新）
 │  │  ├─ ai-voice-assistant-architecture.md
 │  │  ├─ api-specification.md
-│  │  └─ GEMINI_LIVE_IMPLEMENTATION_PLAN.md
+│  │  └─ GEMINI_LIVE_IMPLEMENTATION_PLAN.md  # ✅ 已完成歸檔
 │  └─ README.md                      # 專案主文件
 │
 ├─ 🗂️ 歷史檔案
