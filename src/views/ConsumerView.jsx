@@ -1,7 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Phone, PhoneOff, Mic, MicOff, ChevronLeft, Loader2, Building2, UtensilsCrossed, Hotel, Volume2, Radio, Wifi, Sparkles, AlertCircle } from 'lucide-react';
 import { useCall } from '../context/CallContext';
-import { ModeSwitch } from '../components/ModeSwitch';
 
 // Icon 映射
 const iconMap = {
@@ -95,18 +94,6 @@ export default function ConsumerView() {
 
   return (
     <div className="h-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* 模式切換 - 手機外部 */}
-      <div className="absolute top-6 right-6">
-        <ModeSwitch
-          voiceMode={voiceMode}
-          onModeChange={switchMode}
-          disabled={callState === 'connected' || callState === 'dialing'}
-          connectionStatus={connectionStatus}
-          geminiConnectionStatus={geminiConnectionStatus}
-          compact={false}
-        />
-      </div>
-
       {/* 手機框架 */}
       <div className="w-[390px] h-[844px] bg-black rounded-[55px] p-4 shadow-2xl border border-slate-700">
         <div className="w-full h-full bg-slate-950 rounded-[45px] overflow-hidden flex flex-col relative">

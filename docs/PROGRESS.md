@@ -2,7 +2,7 @@
 
 > **任務規劃**: [TASK_PLAN.md](TASK_PLAN.md)  
 > **開發規範**: [../.claude/skills/project-workflow/SKILL.md](../.claude/skills/project-workflow/SKILL.md)  
-> **最後更新**: 2026-02-26
+> **最後更新**: 2026-03-02
 
 ---
 
@@ -11,8 +11,8 @@
 | Phase | 名稱 | 狀態 | 預計 | 實際 |
 |-------|------|------|------|------|
 | 0 | 文件清理 | ✅ 已完成 | 0.5 天 | 0.5 天 |
-| 1 | UI 佈局修正 | 📋 待開始 | 1 天 | - |
-| 2 | 四視角模式感知 | 📋 待開始 | 2 天 | - |
+| 1 | UI 佈局修正 | ✅ 已完成 | 1 天 | 0.5 天 |
+| 2 | 四視角模式感知 | ✅ 已完成 | 2 天 | 0.5 天 |
 | 3 | Live 模式意圖分析與單據 | 📋 待開始 | 3-5 天 | - |
 | 4 | 整合測試與優化 | 📋 待開始 | 1 天 | - |
 
@@ -34,27 +34,27 @@
 ---
 
 ### Phase 1: UI 佈局修正
-**狀態**: 📋 待開始  
-**預計**: 1 天 | **實際**: -
+**狀態**: ✅ 2026-03-02 完成  
+**預計**: 1 天 | **實際**: 0.5 天
 
 | # | 任務 | 狀態 | 完成日期 | 備註 |
 |---|------|------|----------|------|
-| 1-1 | 統一 ModeSwitch 至 App.jsx header | 📋 | - | |
-| 1-2 | 移除 ConsumerView 獨立 ModeSwitch | 📋 | - | |
-| 1-3 | 確認各視角無遮擋 | 📋 | - | |
+| 1-1 | 統一 ModeSwitch 至 App.jsx header | ✅ | 2026-03-02 | 建立 HeaderModeSwitch 子元件，compact 模式置於 header 右側 |
+| 1-2 | 移除 ConsumerView 獨立 ModeSwitch | ✅ | 2026-03-02 | 移除 absolute 定位的 ModeSwitch 和 import |
+| 1-3 | 確認各視角無遮擋 | ✅ | 2026-03-02 | Docker build 通過、HMR 正常 |
 
 ---
 
 ### Phase 2: 四視角模式感知
-**狀態**: 📋 待開始  
-**預計**: 2 天 | **實際**: -
+**狀態**: ✅ 2026-03-02 完成  
+**預計**: 2 天 | **實際**: 0.5 天
 
 | # | 任務 | 狀態 | 完成日期 | 備註 |
 |---|------|------|----------|------|
-| 2-1 | AgentView 支援 Live 模式語音輸入 | 📋 | - | |
-| 2-2 | SystemView 適配 Gemini Pipeline | 📋 | - | |
-| 2-3 | SystemView 加入 Gemini 資訊 | 📋 | - | |
-| 2-4 | DemoView PhoneSimulator 模式指示 | 📋 | - | |
+| 2-1 | AgentView 支援 Live 模式語音輸入 | ✅ | 2026-03-02 | Mock→nextStep / REST→PTT / Gemini→串流指示器；模式標籤+空白提示語 |
+| 2-2 | SystemView 適配 Gemini Pipeline | ✅ | 2026-03-02 | 動態 pipeline（REST 5 節點、Gemini 3 節點）、模式標籤、mode-aware 進度/控制 |
+| 2-3 | SystemView 加入 Gemini 資訊 | ✅ | 2026-03-02 | 右側欄依模式切換：REST→ASR/LLM/TTS 延遲分解 / Gemini→E2E 延遲+連線+Token+串流 |
+| 2-4 | DemoView PhoneSimulator 模式指示 | ✅ | 2026-03-02 | 通話中顯示模式 badge（Mock/REST/Gemini + 串流動畫）|
 
 ---
 
@@ -92,3 +92,5 @@
 |------|------|
 | 2026-02-26 | 建立任務規劃、Skill 規範、進度追蹤文件 |
 | 2026-02-26 | ✅ Phase 0 完成：更新 README、STRUCTURE、GEMINI_LIVE_IMPLEMENTATION_PLAN、copilot-instructions |
+| 2026-03-02 | ✅ Phase 1 完成：ModeSwitch 統一至 App header（compact）、移除 ConsumerView 獨立 ModeSwitch |
+| 2026-03-02 | ✅ Phase 2 完成：AgentView PTT/串流、SystemView 動態 pipeline+Gemini 統計、PhoneSimulator 模式 badge |

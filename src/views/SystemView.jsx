@@ -1,8 +1,9 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import {
   Settings, Mic, Brain, Volume2, ArrowRight, Phone, PhoneOff,
   Activity, Clock, Database, Server, Cpu, MemoryStick, Zap,
-  Building2, UtensilsCrossed, Hotel, CheckCircle, AlertTriangle
+  Building2, UtensilsCrossed, Hotel, CheckCircle, AlertTriangle,
+  Sparkles, Wifi, Radio, Loader2
 } from 'lucide-react';
 import { useCall } from '../context/CallContext';
 
@@ -13,13 +14,20 @@ const iconMap = {
   Hotel
 };
 
-// 流程步驟
-const pipelineSteps = [
+// 流程步驟 — REST / Mock
+const restPipelineSteps = [
   { id: 'input', label: '語音輸入', icon: Mic, color: 'cyan' },
   { id: 'asr', label: 'ASR', subLabel: 'Whisper', icon: Mic, color: 'blue' },
   { id: 'llm', label: 'LLM', subLabel: 'Claude', icon: Brain, color: 'purple' },
   { id: 'tts', label: 'TTS', subLabel: 'Azure', icon: Volume2, color: 'pink' },
   { id: 'output', label: '語音輸出', icon: Volume2, color: 'emerald' }
+];
+
+// 流程步驟 — Gemini Live（端到端）
+const geminiPipelineSteps = [
+  { id: 'input', label: '語音輸入', subLabel: '16kHz PCM', icon: Mic, color: 'cyan' },
+  { id: 'gemini', label: 'Gemini', subLabel: 'E2E Multimodal', icon: Sparkles, color: 'purple' },
+  { id: 'output', label: '語音輸出', subLabel: '24kHz PCM', icon: Volume2, color: 'emerald' }
 ];
 
 export default function SystemView() {
@@ -37,8 +45,23 @@ export default function SystemView() {
     hangUp,
     goBack,
     nextStep,
-    formatDuration
+    formatDuration,
+    // 模式相關
+    voiceMode,
+    isProcessing,
+    isStreaming,
+    isRecording,
+    isPlaying,
+    audioLevel,
+    startRecording,
+    stopRecordingAndSend,
+    geminiConnectionStatus,
+    geminiTokenUsage
   } = useCall();
+
+  const pipelineSteps = useMemo(() =>
+    voiceMode === 'gemini-live' ? geminiPipelineSteps : restPipelineSteps
+  , [voiceMode]);
 
   const logContainerRef = useRef(null);
   const conversationContainerRef = useRef(null);
@@ -126,7 +149,16 @@ export default function SystemView() {
           {/* Pipeline 流程圖 */}
           <div className="p-6 border-b border-slate-800">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm text-slate-400 font-medium">Processing Pipeline</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-sm text-slate-400 font-medium">Processing Pipeline</h2>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                  voiceMode === 'mock' ? 'bg-slate-700 text-slate-400' :
+                  voiceMode === 'rest-live' ? 'bg-cyan-500/20 text-cyan-300' :
+                  'bg-purple-500/20 text-purple-300'
+                }`}>
+                  {voiceMode === 'mock' ? 'MOCK' : voiceMode === 'rest-live' ? 'REST' : 'GEMINI'}
+                </span>
+              </div>
               {callState === 'connected' && (
                 <div className="flex items-center gap-2 text-xs">
                   <span className="text-slate-500">Total Latency:</span>
@@ -172,6 +204,11 @@ export default function SystemView() {
                     {step.id === 'tts' && latencyMetrics.tts > 0 && (
                       <span className={`text-xs font-mono mt-1 text-${getLatencyColor(latencyMetrics.tts)}-400`}>
                         {latencyMetrics.tts}ms
+                      </span>
+                    )}
+                    {step.id === 'gemini' && latencyMetrics.total > 0 && (
+                      <span className={`text-xs font-mono mt-1 text-${getLatencyColor(latencyMetrics.total)}-400`}>
+                        {latencyMetrics.total}ms e2e
                       </span>
                     )}
                   </div>
@@ -226,7 +263,11 @@ export default function SystemView() {
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <span className="text-slate-500">進度:</span>
-                    <span className="text-slate-300">{displayedConversations.length}/{scenario.conversations.length}</span>
+                    <span className="text-slate-300">
+                      {voiceMode === 'mock'
+                        ? `${displayedConversations.length}/${scenario.conversations.length}`
+                        : `${displayedConversations.length} turns`}
+                    </span>
                   </div>
                 </div>
 
@@ -261,17 +302,56 @@ export default function SystemView() {
                   </div>
                 </div>
 
-                {/* 下一步控制 / 返回按鈕 */}
+                {/* 下方控制 - 依模式不同 */}
                 <div className="flex-shrink-0 p-4 border-t border-slate-800">
                   {callState === 'connected' ? (
-                    <button
-                      onClick={nextStep}
-                      className="w-full py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer border border-indigo-500/30"
-                    >
-                      <Zap className="w-4 h-4" />
-                      Execute Next Turn
-                      <span className="text-indigo-400/60">({conversationIndex + 2}/{scenario.conversations.length})</span>
-                    </button>
+                    voiceMode === 'mock' ? (
+                      <button
+                        onClick={nextStep}
+                        className="w-full py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer border border-indigo-500/30"
+                      >
+                        <Zap className="w-4 h-4" />
+                        Execute Next Turn
+                        <span className="text-indigo-400/60">({conversationIndex + 2}/{scenario.conversations.length})</span>
+                      </button>
+                    ) : voiceMode === 'rest-live' ? (
+                      <div className="space-y-2">
+                        {isProcessing && (
+                          <div className="flex items-center justify-center gap-2 text-amber-300 text-xs py-1">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Processing...
+                          </div>
+                        )}
+                        <button
+                          onMouseDown={async (e) => { e.preventDefault(); if (!isProcessing && !isPlaying) await startRecording(); }}
+                          onMouseUp={async (e) => { e.preventDefault(); if (isRecording) await stopRecordingAndSend(); }}
+                          onMouseLeave={async (e) => { e.preventDefault(); if (isRecording) await stopRecordingAndSend(); }}
+                          disabled={isProcessing || isPlaying}
+                          className={`w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                            isRecording
+                              ? 'bg-red-500/20 border-red-500/50 text-red-300'
+                              : isProcessing || isPlaying
+                              ? 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+                              : 'bg-cyan-500/20 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/30'
+                          }`}
+                        >
+                          <Mic className={`w-4 h-4 ${isRecording ? 'animate-pulse' : ''}`} />
+                          {isRecording ? 'Recording... Release to Send' : 'Hold to Talk (PTT)'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className={`w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 border ${
+                        isStreaming
+                          ? 'bg-purple-500/20 border-purple-500/30 text-purple-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-500'
+                      }`}>
+                        {isStreaming ? (
+                          <><Radio className="w-3 h-3 animate-pulse" /> Gemini Streaming Active</>
+                        ) : (
+                          <><Wifi className="w-3 h-3" /> Gemini Ready — Voice-Activated</>
+                        )}
+                      </div>
+                    )
                   ) : callState === 'ended' ? (
                     <button
                       onClick={goBack}
@@ -322,7 +402,7 @@ export default function SystemView() {
           </div>
 
           {/* 延遲統計 */}
-          {callState === 'connected' && (
+          {callState === 'connected' && voiceMode !== 'gemini-live' && (
             <div className="p-4 border-t border-slate-800 space-y-3">
               <div className="text-xs text-slate-500 mb-2">Latency Breakdown</div>
               {[
@@ -345,6 +425,60 @@ export default function SystemView() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Gemini Live 統計 */}
+          {callState === 'connected' && voiceMode === 'gemini-live' && (
+            <div className="p-4 border-t border-slate-800 space-y-3">
+              <div className="text-xs text-slate-500 mb-2">Gemini Live Stats</div>
+              {/* 連線狀態 */}
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Connection</span>
+                <span className={`font-medium ${
+                  geminiConnectionStatus === 'connected' ? 'text-emerald-400' :
+                  geminiConnectionStatus === 'connecting' ? 'text-amber-400' :
+                  'text-slate-500'
+                }`}>
+                  {geminiConnectionStatus === 'connected' ? 'Active' :
+                   geminiConnectionStatus === 'connecting' ? 'Connecting...' : 'Idle'}
+                </span>
+              </div>
+              {/* E2E 延遲 */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500">E2E Latency</span>
+                  <span className={`font-mono text-${getLatencyColor(latencyMetrics.total)}-400`}>
+                    {latencyMetrics.total}ms
+                  </span>
+                </div>
+                <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full bg-${getLatencyColor(latencyMetrics.total)}-500 rounded-full transition-all`}
+                    style={{ width: `${Math.min((latencyMetrics.total / 2000) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+              {/* Token 使用 */}
+              {geminiTokenUsage && (
+                <>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Input Tokens</span>
+                    <span className="text-purple-400 font-mono">{geminiTokenUsage.inputTokens || 0}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Output Tokens</span>
+                    <span className="text-purple-400 font-mono">{geminiTokenUsage.outputTokens || 0}</span>
+                  </div>
+                </>
+              )}
+              {/* 串流狀態 */}
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Streaming</span>
+                <span className={isStreaming ? 'text-purple-400' : 'text-slate-600'}>
+                  {isStreaming ? '● Active' : '○ Idle'}
+                </span>
+              </div>
             </div>
           )}
         </div>

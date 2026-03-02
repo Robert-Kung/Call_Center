@@ -2,7 +2,8 @@ import React, { useRef, useEffect } from 'react';
 import {
   Headphones, Phone, PhoneOff, Mic, MicOff, User, Bot, Brain, FileText,
   AlertTriangle, CheckCircle, XCircle, Info, Activity, Clock, ArrowRight,
-  Building2, UtensilsCrossed, Hotel, Volume2, Pause, Play, Settings, MessageSquare
+  Building2, UtensilsCrossed, Hotel, Volume2, Pause, Play, Settings, MessageSquare,
+  Radio, Wifi, Sparkles, AlertCircle, Loader2
 } from 'lucide-react';
 import { useCall } from '../context/CallContext';
 import SystemLogPanel from '../components/SystemLogPanel';
@@ -32,7 +33,22 @@ export default function AgentView() {
     goBack,
     toggleMute,
     nextStep,
-    formatDuration
+    formatDuration,
+    // 模式相關
+    voiceMode,
+    isProcessing,
+    error,
+    clearError,
+    // Gemini Live 串流
+    isStreaming,
+    geminiConnectionStatus,
+    // 錄音相關
+    isRecording,
+    audioLevel,
+    startRecording,
+    stopRecordingAndSend,
+    // 播放相關
+    isPlaying
   } = useCall();
 
   const chatContainerRef = useRef(null);
@@ -49,6 +65,24 @@ export default function AgentView() {
       dial();
     }
   }, [scenario, callState, dial]);
+
+  // PTT 按鈕處理（REST Live）
+  const handlePTTStart = async (e) => {
+    e.preventDefault();
+    if (voiceMode !== 'mock' && callState === 'connected' && !isProcessing) {
+      await startRecording();
+    }
+  };
+
+  const handlePTTEnd = async (e) => {
+    e.preventDefault();
+    if (isRecording) {
+      await stopRecordingAndSend();
+    }
+  };
+
+  // 模式顯示標籤
+  const modeLabel = voiceMode === 'mock' ? '模擬' : voiceMode === 'rest-live' ? 'REST' : 'Gemini';
 
   const getFlagStyle = (flagType) => {
     switch (flagType) {
@@ -80,6 +114,15 @@ export default function AgentView() {
               </div>
             </div>
           )}
+
+          {/* 模式標籤 */}
+          <span className={`px-2 py-1 rounded text-xs font-medium ${
+            voiceMode === 'mock' ? 'bg-slate-600 text-slate-300' :
+            voiceMode === 'rest-live' ? 'bg-cyan-500/20 text-cyan-300' :
+            'bg-purple-500/20 text-purple-300'
+          }`}>
+            {modeLabel}
+          </span>
         </div>
 
         <div className="flex items-center gap-4">
@@ -181,7 +224,11 @@ export default function AgentView() {
               >
                 {displayedConversations.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-slate-500">
-                    <p className="text-sm">點擊「下一步」開始對話</p>
+                    <p className="text-sm">
+                      {voiceMode === 'mock' ? '點擊「下一步」開始對話' :
+                       voiceMode === 'rest-live' ? '按住說話按鈕開始對話' :
+                       '開始說話，Gemini 即時回應'}
+                    </p>
                   </div>
                 ) : (
                   displayedConversations.map((conv, idx) => (
@@ -212,19 +259,92 @@ export default function AgentView() {
                 )}
               </div>
 
-              {/* 下一步按鈕 / 返回按鈕 */}
+              {/* 下方操作區 - 依模式不同 */}
               <div className="flex-shrink-0 p-4 border-t border-slate-700/50">
                 {callState === 'connected' ? (
-                  <button
-                    onClick={nextStep}
-                    className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                  >
-                    <span>下一步對話</span>
-                    <span className="text-indigo-200 text-sm">
-                      ({conversationIndex + 2}/{scenario?.conversations.length})
-                    </span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+                  voiceMode === 'mock' ? (
+                    /* Mock 模式 — 下一步按鈕 */
+                    <button
+                      onClick={nextStep}
+                      className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <span>下一步對話</span>
+                      <span className="text-indigo-200 text-sm">
+                        ({conversationIndex + 2}/{scenario?.conversations.length})
+                      </span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  ) : voiceMode === 'rest-live' ? (
+                    /* REST Live — PTT 按鈕 */
+                    <div className="space-y-2">
+                      {isProcessing && (
+                        <div className="flex items-center justify-center gap-2 text-amber-300 text-sm py-1">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>處理中...</span>
+                        </div>
+                      )}
+                      {isPlaying && (
+                        <div className="flex items-center justify-center gap-2 text-cyan-300 text-sm py-1">
+                          <Volume2 className="w-4 h-4 animate-pulse" />
+                          <span>AI 回應播放中</span>
+                        </div>
+                      )}
+                      <button
+                        onMouseDown={handlePTTStart}
+                        onMouseUp={handlePTTEnd}
+                        onMouseLeave={handlePTTEnd}
+                        onTouchStart={handlePTTStart}
+                        onTouchEnd={handlePTTEnd}
+                        disabled={isProcessing || isPlaying}
+                        className={`w-full py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                          isRecording
+                            ? 'bg-red-500 text-white scale-[1.02]'
+                            : isProcessing || isPlaying
+                            ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                            : 'bg-indigo-500 hover:bg-indigo-600 text-white'
+                        }`}
+                      >
+                        {isRecording ? (
+                          <>
+                            <Mic className="w-4 h-4 animate-pulse" />
+                            <span>鬆開發送</span>
+                            {audioLevel > 0 && (
+                              <div className="w-16 h-1.5 bg-red-300/30 rounded-full overflow-hidden">
+                                <div className="h-full bg-white rounded-full transition-all" style={{ width: `${Math.min(audioLevel * 100, 100)}%` }} />
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <Mic className="w-4 h-4" />
+                            <span>按住說話 (PTT)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    /* Gemini Live — 串流狀態 */
+                    <div className="space-y-2">
+                      <div className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 text-sm ${
+                        isStreaming
+                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                          : 'bg-slate-700/50 text-slate-400'
+                      }`}>
+                        {isStreaming ? (
+                          <>
+                            <Sparkles className="w-4 h-4 animate-pulse" />
+                            <span>Gemini 對話串流中</span>
+                            <Radio className="w-3 h-3 animate-pulse" />
+                          </>
+                        ) : (
+                          <>
+                            <Wifi className="w-4 h-4" />
+                            <span>Gemini 連線就緒 — 直接語音對話</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )
                 ) : callState === 'ended' ? (
                   <button
                     onClick={goBack}

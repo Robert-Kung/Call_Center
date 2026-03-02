@@ -1,5 +1,5 @@
 import React from 'react';
-import { Phone, PhoneOff, Mic, MicOff, ChevronLeft, Loader2, Building2, UtensilsCrossed, Hotel } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, ChevronLeft, Loader2, Building2, UtensilsCrossed, Hotel, Sparkles, Radio, Wifi } from 'lucide-react';
 import { useCall } from '../context/CallContext';
 
 // Icon 映射
@@ -21,7 +21,9 @@ export default function PhoneSimulator({ compact = false }) {
     hangUp,
     goBack,
     toggleMute,
-    formatDuration
+    formatDuration,
+    voiceMode,
+    isStreaming
   } = useCall();
 
   const IconComponent = scenario ? iconMap[scenario.icon] : null;
@@ -120,6 +122,16 @@ export default function PhoneSimulator({ compact = false }) {
                       <p className="text-2xl font-mono text-white mt-1">
                         {formatDuration(callDuration)}
                       </p>
+                      {/* 模式標籤 */}
+                      <span className={`inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                        voiceMode === 'mock' ? 'bg-slate-700 text-slate-400' :
+                        voiceMode === 'rest-live' ? 'bg-cyan-500/20 text-cyan-300' :
+                        'bg-purple-500/20 text-purple-300'
+                      }`}>
+                        {voiceMode === 'gemini-live' && <Sparkles className="w-2.5 h-2.5" />}
+                        {voiceMode === 'mock' ? 'Mock' : voiceMode === 'rest-live' ? 'REST' : 'Gemini'}
+                        {voiceMode === 'gemini-live' && isStreaming && <Radio className="w-2.5 h-2.5 animate-pulse" />}
+                      </span>
                     </div>
                   )}
                   {callState === 'ended' && (

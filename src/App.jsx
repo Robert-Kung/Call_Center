@@ -3,7 +3,8 @@ import DemoView from './views/DemoView';
 import ConsumerView from './views/ConsumerView';
 import AgentView from './views/AgentView';
 import SystemView from './views/SystemView';
-import { CallProvider } from './context/CallContext';
+import { CallProvider, useCall } from './context/CallContext';
+import { ModeSwitch } from './components/ModeSwitch';
 import { Presentation, Smartphone, Headphones, Settings, Phone } from 'lucide-react';
 
 const viewConfig = [
@@ -12,6 +13,21 @@ const viewConfig = [
   { id: 'agent', label: '客服視角', icon: Headphones, description: '值機人員介面' },
   { id: 'system', label: '系統視角', icon: Settings, description: '技術人員監控' },
 ];
+
+/** Header 中的模式切換（需在 CallProvider 內部才能取得 context） */
+function HeaderModeSwitch() {
+  const { voiceMode, switchMode, callState, connectionStatus, geminiConnectionStatus } = useCall();
+  return (
+    <ModeSwitch
+      voiceMode={voiceMode}
+      onModeChange={switchMode}
+      disabled={callState === 'connected' || callState === 'dialing'}
+      connectionStatus={connectionStatus}
+      geminiConnectionStatus={geminiConnectionStatus}
+      compact={true}
+    />
+  );
+}
 
 export default function App() {
   const [currentView, setCurrentView] = useState('demo');
@@ -70,14 +86,10 @@ export default function App() {
               })}
             </nav>
 
-            {/* 右側資訊 */}
+            {/* 右側 - 模式切換 + 狀態 */}
             <div className="flex items-center gap-4">
-              <div className="text-right">
-                <div className="text-xs text-slate-500">當前視角</div>
-                <div className="text-sm text-white font-medium">
-                  {viewConfig.find(v => v.id === currentView)?.description}
-                </div>
-              </div>
+              <HeaderModeSwitch />
+              <div className="w-px h-8 bg-slate-700" />
               <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" title="系統運行中" />
             </div>
           </div>
