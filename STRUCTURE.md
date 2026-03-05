@@ -33,7 +33,7 @@ Call_Center/
 │  │  │  └─ api.js                   # API + Gemini 配置
 │  │  └─ views/
 │  │     ├─ DemoView.jsx             # 展示視角
-│  │     ├─ ConsumerView.jsx         # 消費者視角（含 PTT 錄音）
+│  │     ├─ ConsumerView.jsx         # 消費者視角（語音串流）
 │  │     ├─ AgentView.jsx            # 客服視角
 │  │     └─ SystemView.jsx           # 系統視角（Pipeline 視覺化）
 │  ├─ index.html                     # HTML 模板

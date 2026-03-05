@@ -413,12 +413,10 @@ class GeminiLiveService {
         },
         // Function Calling — tools 必須放在 setup 頂層（與 generationConfig 同級）
         // 官方格式: tools: [{ functionDeclarations: [...] }]
-        // analyze_intent 設為 NON_BLOCKING，避免阻塞音訊輸出
+        // 注意：functionDeclarations 只接受 name/description/parameters，無自訂 behavior 欄位
+        // 非阻塞的 analyze_intent 行為改由 _handleFunctionCall (約 627–636 行) 以最小回覆 ACK 處理，不再透過 behavior 設定。
         tools: [{
-          functionDeclarations: GEMINI_TOOL_DECLARATIONS.map(decl => ({
-            ...decl,
-            ...(decl.name === 'analyze_intent' ? { behavior: 'NON_BLOCKING' } : {})
-          }))
+          functionDeclarations: GEMINI_TOOL_DECLARATIONS
         }],
         outputAudioTranscription: {},
         inputAudioTranscription: {}
@@ -621,6 +619,22 @@ class GeminiLiveService {
 
     sessionLogger.log('function_call', { name, id, args });
 
+    // === analyze_intent：更新 UI，送出最小 ack 給 Gemini ===
+    // functionDeclarations 無 NON_BLOCKING 欄位，Gemini 實際上會等待 toolResponse。
+    // 不回應 → Gemini 等待超時 → 重新生成 → 第二次歡迎語（雙重播放的根因）。
+    // 正確做法：立即送 { status: 'ok' }，滿足 Gemini 期待，
+    // 不含分析內容（Gemini 沒有可「反應」的資訊，就不會主動繼續說話）。
+    if (name === 'analyze_intent') {
+      if (this.onToolCall) {
+        try { this.onToolCall({ name, args, id }); } catch (e) {
+          console.error('[GeminiLive] ✗ onToolCall (analyze_intent) 錯誤:', e);
+        }
+      }
+      this._sendFunctionResponse(name, id, { status: 'ok' });
+      sessionLogger.log('function_call_handled', { name, id, minimalAck: true });
+      return;
+    }
+
     // 通知外部（CallContext）並取得執行結果
     // onToolCall 應回傳 result 物件，供 Gemini 了解函式執行結果
     let result = { result: 'ok' };
@@ -638,9 +652,7 @@ class GeminiLiveService {
 
     // 回傳 functionResponse 給 Gemini（含實際執行結果）
     // 官方格式: { toolResponse: { functionResponses: [{ id, name, response }] } }
-    // analyze_intent 用 WHEN_IDLE（不打斷）; create_ticket 用 INTERRUPT（立即回報）
-    const scheduling = name === 'analyze_intent' ? 'WHEN_IDLE' : 'INTERRUPT';
-    this._sendFunctionResponse(name, id, { ...result, scheduling });
+    this._sendFunctionResponse(name, id, result);
   }
 
   /**

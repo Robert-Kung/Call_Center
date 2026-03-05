@@ -4,7 +4,7 @@ import fs from 'fs'
 import path from 'path'
 
 const backendHost = process.env.VITE_BACKEND_HOST || '192.168.2.100';
-const backendPort = process.env.VITE_BACKEND_PORT || '3000';
+const backendPort = process.env.VITE_BACKEND_PORT || '8003';
 
 // Session Log Plugin — 接收前端 POST 的對話記錄，寫入 data/ 資料夾 + Docker log
 function sessionLogPlugin() {
@@ -109,6 +109,7 @@ export default defineConfig({
   server: {
     port: 3100,
     host: '0.0.0.0',
+    allowedHosts: ['callcenter.rouqikong.com'],
     watch: {
       usePolling: true,
     },
@@ -126,6 +127,23 @@ export default defineConfig({
         configure: (proxy) => {
           proxy.on('error', (err) => {
             console.log('Proxy error:', err);
+          });
+        }
+      },
+      // REST WebSocket proxy — 開發環境可設 VITE_REST_WS_URL=/ws/live
+      '/ws': {
+        target: `ws://${backendHost}:${backendPort}`,
+        ws: true,
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err, req) => {
+            console.error(`[WS Proxy] ❌ Error: ${err.message} | path: ${req?.url || '?'}`);
+          });
+          proxy.on('proxyReqWs', (proxyReq, req) => {
+            console.log(`[WS Proxy] 🔗 ${req.url} → ws://${backendHost}:${backendPort}${req.url}`);
+          });
+          proxy.on('close', (res, socket) => {
+            console.log(`[WS Proxy] 🔌 closed`);
           });
         }
       }

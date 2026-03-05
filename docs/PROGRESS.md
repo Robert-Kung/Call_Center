@@ -2,7 +2,7 @@
 
 > **任務規劃**: [TASK_PLAN.md](TASK_PLAN.md)  
 > **開發規範**: [../.claude/skills/project-workflow/SKILL.md](../.claude/skills/project-workflow/SKILL.md)  
-> **最後更新**: 2026-03-02
+> **最後更新**: 2026-03-04
 
 ---
 
@@ -15,6 +15,7 @@
 | 2 | 四視角模式感知 | ✅ 已完成 | 2 天 | 0.5 天 |
 | 3 | Live 模式意圖分析與單據 | ✅ 已完成 | 3-5 天 | 1 天 |
 | 4 | 整合測試與優化 | ✅ 已完成 | 1 天 | 0.5 天 |
+| 5 | REST Live 改用 WebSocket 流線 | ✅ 已完成 | 2 天 | 1 天 |
 
 ---
 
@@ -94,6 +95,32 @@
 
 ---
 
+### Phase 5: REST Live 改用 WebSocket 流線
+**狀態**: ✅ 2026-03-04 完成  
+**預計**: 2 天 | **實際**: 1 天  
+**核心調整**: REST HTTP 請求回應模式 → WebSocket 雙向串流（後端負責 VAD）
+
+| # | 任務 | 狀態 | 完成日期 | 備註 |
+|---|------|------|----------|------|
+| 5-1 | `REST_WS_CONFIG` 加入 api.js | ✅ | 2026-03-03 | 加入 wsUrl/voice/audio/latencyThresholds/connection；`API_CONFIG` 簡化為僅 baseUrl+defaultVoiceId |
+| 5-2 | 建立 `RestWebSocketService.js` | ✅ | 2026-03-04 | 採用 Gemini Live wire protocol（setup/realtimeInput/serverContent/toolCall）；支援 setupComplete 握手、Blob 訊息、function calling |
+| 5-3 | 更新 `VoiceService.js` | ✅ | 2026-03-03 | 移除舊 HTTP 方法；新增 7 個 REST WS 委任方法 |
+| 5-4 | 重寫 `CallContext.jsx` | ✅ | 2026-03-03 | 移除 PTT/錄音器邏輯；新增 `dialRestWs()`；`isStreaming` 共用於雙模式 |
+| 5-5 | 清理 `ApiClient.js` | ✅ | 2026-03-03 | 移除 startSession/sendAudio 等；僅保留 `healthCheck()` |
+| 5-6 | UI 調整 | ✅ | 2026-03-03 | ModeSwitch 標籤改為「WS Live」；新增 `RestWsPanel.jsx`；AgentView PTT 改為串流狀態指示 |
+| 5-7 | Vite proxy + .env 設定 | ✅ | 2026-03-03 | `/ws` proxy 指向後端；`VITE_REST_WS_URL=/ws/live`（相對路徑，自動對應 wss://）|
+| 5-8 | HTTPS 混合內容修復 | ✅ | 2026-03-03 | 相對路徑識別 + 自動補 wss:// 協定；路由競爆 env_file 載入問題修復 |
+| 5-9 | RestWebSocketService 改為 Gemini 協定 | ✅ | 2026-03-04 | 改用 Gemini Live wire protocol；提升酶斷診斷、stopStreaming 統計、function calling |
+
+**主要設計決策**:
+- 後端目標位址: `ws://192.168.2.100:8003/ws/live`（uvicorn 服務，支援 Gemini Live wire protocol）
+- 後端不發送 `connection_established`，`_sendSetupMessage` 等待 `setupComplete`
+- 歡迎語由後端在 setupComplete 後自動推送（TODO: 觸發機制待後端確認）
+- 音訊格式: `{ realtimeInput: { audio: { mimeType, data } } }`
+- function calling: `analyze_intent` 不送 toolResponse；`create_ticket` 送 toolResponse
+
+---
+
 ## 變更日誌
 
 | 日期 | 事項 |
@@ -104,3 +131,6 @@
 | 2026-03-02 | ✅ Phase 2 完成：AgentView PTT/串流、SystemView 動態 pipeline+Gemini 統計、PhoneSimulator 模式 badge |
 | 2026-03-02 | ✅ Phase 3 完成：Gemini Function Calling 驗證+實作，analyze_intent+create_ticket 工具，NON_BLOCKING 非同步，uid() 唯一 ID |
 | 2026-03-02 | ✅ Phase 4 完成：狀態保持防竟修復、header 響應式、文件同步更新 |
+| 2026-03-03 | 開始 Phase 5：REST WS 重構規劃完成；執行 Phase 1-7（內部分院）完成；env 載入問題修復；HTTPS mixed content 修復 |
+| 2026-03-04 | ✅ Phase 5 完成：RestWebSocketService 改用 Gemini Live wire protocol，build 驗證通過 |
+| 2026-03-04 | 移除 ConsumerView/SystemView 殘留 PTT 按鈕（`startRecording`/`stopRecordingAndSend` 已無效）；改為 WS Live 串流狀態指示器（青色，對齊 Gemini Live 紫色） |
