@@ -8,7 +8,8 @@ export default function ConversationPanel({ showNextButton = true }) {
     callState,
     displayedConversations,
     conversationIndex,
-    nextStep
+    nextStep,
+    voiceMode
   } = useCall();
 
   const chatContainerRef = useRef(null);
@@ -95,8 +96,8 @@ export default function ConversationPanel({ showNextButton = true }) {
         )}
       </div>
 
-      {/* 下一步按鈕 */}
-      {showNextButton && callState === 'connected' && (
+      {/* 下一步按鈕 — Mock 模式才顯示 */}
+      {showNextButton && callState === 'connected' && voiceMode === 'mock' && (
         <div className="p-4 border-t border-slate-700/50">
           <button
             onClick={nextStep}

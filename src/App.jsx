@@ -3,15 +3,17 @@ import DemoView from './views/DemoView';
 import ConsumerView from './views/ConsumerView';
 import AgentView from './views/AgentView';
 import SystemView from './views/SystemView';
+import HistoryView from './views/HistoryView';
 import { CallProvider, useCall } from './context/CallContext';
 import { ModeSwitch } from './components/ModeSwitch';
-import { Presentation, Smartphone, Headphones, Settings, Phone } from 'lucide-react';
+import { Presentation, Smartphone, Headphones, Settings, Phone, History } from 'lucide-react';
 
 const viewConfig = [
   { id: 'demo', label: '展示模式', icon: Presentation, description: '商家決策者視角' },
   { id: 'consumer', label: '消費者視角', icon: Smartphone, description: '終端用戶體驗' },
   { id: 'agent', label: '客服視角', icon: Headphones, description: '值機人員介面' },
   { id: 'system', label: '系統視角', icon: Settings, description: '技術人員監控' },
+  { id: 'history', label: '歷史紀錄', icon: History, description: '通話記錄總覽' },
 ];
 
 /** Header 中的模式切換（需在 CallProvider 內部才能取得 context） */
@@ -42,6 +44,8 @@ export default function App() {
         return <AgentView />;
       case 'system':
         return <SystemView />;
+      case 'history':
+        return <HistoryView />;
       default:
         return <DemoView />;
     }

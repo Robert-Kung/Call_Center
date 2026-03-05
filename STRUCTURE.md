@@ -31,11 +31,17 @@ Call_Center/
 │  │  │  └─ scenarios.js             # Mock 對話腳本（3 場景）
 │  │  ├─ config/
 │  │  │  └─ api.js                   # API + Gemini 配置
-│  │  └─ views/
-│  │     ├─ DemoView.jsx             # 展示視角
-│  │     ├─ ConsumerView.jsx         # 消費者視角（語音串流）
-│  │     ├─ AgentView.jsx            # 客服視角
-│  │     └─ SystemView.jsx           # 系統視角（Pipeline 視覺化）
+│  │  ├─ views/
+│  │  │  ├─ DemoView.jsx             # 展示視角
+│  │  │  ├─ ConsumerView.jsx         # 消費者視角（語音串流）
+│  │  │  ├─ AgentView.jsx            # 客服視角
+│  │  │  ├─ SystemView.jsx           # 系統視角（Pipeline 視覺化）
+│  │  │  └─ HistoryView.jsx          # 歷史紀錄視角（session 總覽）
+│  │  └─ components/
+│  │     └─ history/
+│  │        ├─ StatsOverview.jsx     # KPI 卡片 + 圖表（模式/情境/延遲/意圖）
+│  │        ├─ SessionTable.jsx      # 可篩選/排序的 session 列表
+│  │        └─ SessionDetail.jsx     # 單一 session 對話/意圖/工單詳細頁
 │  ├─ index.html                     # HTML 模板
 │  ├─ package.json                   # 前端依賴
 │  ├─ vite.config.js                 # Vite 配置（proxy → 後端）
@@ -73,7 +79,8 @@ Call_Center/
 │
 ├─ 🗄️ 通話記錄
 │  └─ data/                          # Session 記錄（本地，不上傳 git）
-│     └─ session-*.json              # 各次 Gemini Live 通話記錄
+│     ├─ session-*.json              # 各次通話記錄（gemini / rest-ws / legacy）
+│     └─ sessions-index.json         # 自動維護的摘要索引（供靜態環境 fallback）
 │
 ├─ ⚙️ 配置與部署
 │  ├─ .github/

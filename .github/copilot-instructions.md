@@ -1,7 +1,7 @@
 # Copilot Instructions
 
 ## Project overview
-- React + Vite frontend (port 3100) in [src/App.jsx](src/App.jsx) with four views (demo/consumer/agent/system).
+- React + Vite frontend (port 3100) in [src/App.jsx](src/App.jsx) with five views (demo/consumer/agent/system/history).
 - Three voice modes: **Mock** (scripted demo), **WS Live** (Gemini Live wire protocol via backend proxy), **Gemini Live** (end-to-end WebSocket, direct to Google).
 - Backend proxy server at `192.168.2.100:8003` (uvicorn/Python) — handles WS Live mode via `/ws/live`. Not needed for Mock or Gemini Live.
 - Primary WS Live flow: 16kHz PCM stream → `RestWebSocketService` → backend proxy `/ws/live` (Gemini Live wire protocol) → 24kHz PCM audio + transcript.
@@ -16,7 +16,8 @@
 - Both WS Live and Gemini Live use continuous streaming (server-side VAD — no PTT). `isStreaming` in `CallContext` is shared by both modes. `useAudioRecorder` is removed.
 - Function Calling: `GEMINI_TOOL_DECLARATIONS` in [src/config/api.js](src/config/api.js) defines two tools — `analyze_intent` (NON_BLOCKING, WHEN_IDLE — UI side-effect only, no toolResponse sent) and `create_ticket` (INTERRUPT — sends toolResponse). `CallContext.onToolCall` processes results and updates `currentAnalysis` / `tickets` state.
 - `REST_WS_CONFIG` in [src/config/api.js](src/config/api.js) controls WS Live settings (wsUrl, voice, audio sample rates, latency thresholds, connection timeout).
-- `SessionLogger` ([src/services/SessionLogger.js](src/services/SessionLogger.js)) records sessions (including `function_call` and `function_response` events) to `data/session-*.json` for debugging.
+- `SessionLogger` ([src/services/SessionLogger.js](src/services/SessionLogger.js)) records sessions (including `function_call` and `function_response` events) to `data/session-*.json` for debugging. On each save it also rebuilds `data/sessions-index.json`.
+- **History view**: `HistoryView` ([src/views/HistoryView.jsx](src/views/HistoryView.jsx)) reads session files via `GET /api/sessions` (Vite plugin dev middleware) or fallback to `/data/sessions-index.json` (prod static). `SessionHistoryService` ([src/services/SessionHistoryService.js](src/services/SessionHistoryService.js)) handles fetch + `computeStats()`. Sub-components in `src/components/history/`: `StatsOverview`, `SessionTable`, `SessionDetail`. History view uses local state only — does NOT use `CallContext`.
 - Mock mode replays scripted scenarios from [src/data/scenarios.js](src/data/scenarios.js) without backend traffic. Tickets and analysis come from scenario `action` fields.
 - Audio playback in [src/hooks/useAudioPlayer.js](src/hooks/useAudioPlayer.js); keep 24kHz output settings aligned. Both live modes capture mic directly in their service classes via `getUserMedia`.
 

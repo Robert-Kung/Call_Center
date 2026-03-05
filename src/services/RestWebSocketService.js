@@ -488,7 +488,9 @@ class RestWebSocketService {
 
       // AI 輸出轉錄
       if (content.outputTranscription?.text) {
-        this.outputTranscriptBuffer += content.outputTranscription.text;
+        // 後端傳送的是累積式轉錄 (每次包含完整文字到目前為止)，
+        // 不是增量 delta — 用 = 取代而非 += 避免重複累加。
+        this.outputTranscriptBuffer = content.outputTranscription.text;
         console.log('[RestWS] 🔊 AI:', content.outputTranscription.text);
         sessionLogger.log('output_transcript', { text: content.outputTranscription.text });
         this.onTranscript?.({ type: 'output', text: content.outputTranscription.text });
@@ -509,7 +511,7 @@ class RestWebSocketService {
           : 0;
 
         const response = {
-          audio:    this.audioBuffer.join(''),
+          audio:    this._mergeBase64Audio(this.audioBuffer),
           aiText:   this.outputTranscriptBuffer || this.textBuffer,
           userText: this.inputTranscriptBuffer,
           latency:  { total: latency, e2e: latency }
@@ -624,6 +626,38 @@ class RestWebSocketService {
     this.outputTranscriptBuffer = '';
     this.inputTranscriptBuffer = '';
     this._responseStartTime = null;
+  }
+
+  /**
+   * 正確合併多個 base64 音訊 chunk。
+   * 直接 join() 會把每個 chunk 的 `=` padding 嵌入中間，導致 atob() 拋出
+   * "String contains an invalid character" — 必須先 decode 成 bytes，
+   * 連接後再重新 encode 成單一 base64 字串。
+   */
+  _mergeBase64Audio(chunks) {
+    if (chunks.length === 0) return '';
+    if (chunks.length === 1) return chunks[0];
+
+    // Decode 每個 chunk → Uint8Array（原生 API，避免逐字元迴圈）
+    const arrays = chunks.map(b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+
+    // 合併成單一 buffer
+    const totalLen = arrays.reduce((sum, a) => sum + a.length, 0);
+    const merged = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const a of arrays) {
+      merged.set(a, offset);
+      offset += a.length;
+    }
+
+    // 重新 encode 成單一合法 base64
+    // 分塊呼叫 apply 避免大 buffer 造成 call stack overflow
+    const CHUNK = 0x8000;
+    let bin = '';
+    for (let i = 0; i < merged.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, merged.subarray(i, i + CHUNK));
+    }
+    return btoa(bin);
   }
 
   _notifyConnectionChange(status) {

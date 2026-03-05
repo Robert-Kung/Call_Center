@@ -10,6 +10,70 @@ const backendPort = process.env.VITE_BACKEND_PORT || '8003';
 function sessionLogPlugin() {
   const dataDir = path.resolve(process.cwd(), 'data');
 
+  /** 從 session 物件產生摘要列資料，供 /api/sessions 回傳 */
+  function buildSessionSummary(session, filename) {
+    const events = session.events || [];
+    const latencies = events
+      .filter(e => e.type === 'turn_complete' && typeof e.latency === 'number')
+      .map(e => e.latency);
+    const avgLatency = latencies.length > 0
+      ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+      : null;
+    const intentCalls = events.filter(e => e.type === 'function_call' && e.name === 'analyze_intent');
+    const ticketCalls = events.filter(e => e.type === 'function_call' && e.name === 'create_ticket');
+    const totalTokens = events
+      .filter(e => e.type === 'turn_complete' && e.tokenUsage)
+      .reduce((sum, e) => sum + (e.tokenUsage?.total || 0), 0);
+    const sessionEndEvt = events.find(e => e.type === 'session_end');
+    const duration = sessionEndEvt?.duration
+      || (session.startTime && session.endTime
+        ? new Date(session.endTime) - new Date(session.startTime)
+        : null);
+    const sessionId = session.sessionId;
+    let mode = 'legacy';
+    if (sessionId?.startsWith('gemini-')) mode = 'gemini';
+    else if (sessionId?.startsWith('rest-ws-')) mode = 'rest-ws';
+    return {
+      filename,
+      sessionId,
+      scenarioId: session.scenarioId,
+      scenarioName: session.scenarioName,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      mode,
+      duration,
+      turnCount: (session.summary || []).length,
+      avgLatency,
+      intents: intentCalls.map(e => e.args?.intent).filter(Boolean),
+      intentCount: intentCalls.length,
+      ticketCount: ticketCalls.length,
+      totalTokens,
+    };
+  }
+
+  /** 重建並儲存 sessions-index.json */
+  const isSessionFile = (filename) =>
+    filename.startsWith('session-') &&
+    filename.endsWith('.json') &&
+    filename !== 'sessions-index.json';
+
+  function rebuildIndex() {
+    try {
+      const files = fs.readdirSync(dataDir).filter(isSessionFile);
+      const summaries = files.map(filename => {
+        try {
+          const raw = fs.readFileSync(path.join(dataDir, filename), 'utf-8');
+          return buildSessionSummary(JSON.parse(raw), filename);
+        } catch { return null; }
+      }).filter(Boolean);
+      summaries.sort((a, b) => (b.startTime || '').localeCompare(a.startTime || ''));
+      fs.writeFileSync(path.join(dataDir, 'sessions-index.json'), JSON.stringify(summaries, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Failed to read or parse session file "${filename}":`, err.message || err);
+      return null;
+    }
+  }
+
   return {
     name: 'session-log-plugin',
     configureServer(server) {
@@ -17,6 +81,60 @@ function sessionLogPlugin() {
       if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
       }
+
+      // GET /api/sessions — 回傳所有 session 摘要列表
+      // GET /api/sessions/:filename — 回傳指定 session 完整 JSON
+      server.middlewares.use('/api/sessions', (req, res, next) => {
+        if (req.method !== 'GET') return next();
+        const relPath = req.url.replace(/^\/?/, '');
+        if (relPath && relPath !== '/') {
+          // 單一 session 檔案
+          const filename = relPath.replace(/^\//, '');
+
+          // ── 安全性驗證 ──────────────────────────────────────────────────
+          // 1. 白名單格式：只允許 session-*.json（字母、數字、連字號）
+          const SAFE_FILENAME = /^session-[a-zA-Z0-9_\-]+\.json$/;
+          if (!SAFE_FILENAME.test(filename)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid filename' }));
+            return;
+          }
+          // 2. 路徑沙盒：確認解析後路徑仍在 dataDir 內，防止 path traversal
+          const filepath = path.resolve(dataDir, filename);
+          if (!filepath.startsWith(dataDir + path.sep) && filepath !== dataDir) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Forbidden' }));
+            return;
+          }
+          // ────────────────────────────────────────────────────────────────
+
+          if (fs.existsSync(filepath)) {
+            const content = fs.readFileSync(filepath, 'utf-8');
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(content);
+          } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Not found', filename }));
+          }
+        } else {
+          // 所有 session 摘要
+          try {
+            const files = fs.readdirSync(dataDir).filter(f => f.startsWith('session-') && f.endsWith('.json') && f !== 'sessions-index.json');
+            const summaries = files.map(filename => {
+              try {
+                const raw = fs.readFileSync(path.join(dataDir, filename), 'utf-8');
+                return buildSessionSummary(JSON.parse(raw), filename);
+              } catch { return null; }
+            }).filter(Boolean);
+            summaries.sort((a, b) => (b.startTime || '').localeCompare(a.startTime || ''));
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify(summaries));
+          } catch (err) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+        }
+      });
 
       // 即時事件 log → Docker log (stdout)
       server.middlewares.use('/api/session-log', (req, res, next) => {
@@ -91,6 +209,9 @@ function sessionLogPlugin() {
               console.log('===== 摘要結束 =====\n');
             }
 
+            // 重建 sessions-index.json（供靜態環境 fallback）
+            rebuildIndex();
+
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true, file: filename }));
           } catch (err) {
@@ -121,8 +242,9 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ''),
         timeout: 60000,
         bypass(req) {
-          // session-log 由 Vite plugin 處理，不走 proxy
+          // session-log / sessions 由 Vite plugin 處理，不走 proxy
           if (req.url.startsWith('/api/session-log')) return req.url;
+          if (req.url.startsWith('/api/sessions')) return req.url;
         },
         configure: (proxy) => {
           proxy.on('error', (err) => {
