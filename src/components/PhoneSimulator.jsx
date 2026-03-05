@@ -129,8 +129,10 @@ export default function PhoneSimulator({ compact = false }) {
                         'bg-purple-500/20 text-purple-300'
                       }`}>
                         {voiceMode === 'gemini-live' && <Sparkles className="w-2.5 h-2.5" />}
-                        {voiceMode === 'mock' ? 'Mock' : voiceMode === 'rest-live' ? 'REST' : 'Gemini'}
-                        {voiceMode === 'gemini-live' && isStreaming && <Radio className="w-2.5 h-2.5 animate-pulse" />}
+                        {voiceMode === 'mock' ? 'Mock' : voiceMode === 'rest-live' ? 'WS Live' : 'Gemini'}
+                        {(voiceMode === 'gemini-live' || voiceMode === 'rest-live') && isStreaming && (
+                          <Radio className="w-2.5 h-2.5 animate-pulse" />
+                        )}
                       </span>
                     </div>
                   )}

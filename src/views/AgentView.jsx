@@ -42,11 +42,6 @@ export default function AgentView() {
     // Gemini Live 串流
     isStreaming,
     geminiConnectionStatus,
-    // 錄音相關
-    isRecording,
-    audioLevel,
-    startRecording,
-    stopRecordingAndSend,
     // 播放相關
     isPlaying
   } = useCall();
@@ -66,23 +61,8 @@ export default function AgentView() {
     }
   }, [scenario, callState, dial]);
 
-  // PTT 按鈕處理（REST Live）
-  const handlePTTStart = async (e) => {
-    e.preventDefault();
-    if (voiceMode !== 'mock' && callState === 'connected' && !isProcessing) {
-      await startRecording();
-    }
-  };
-
-  const handlePTTEnd = async (e) => {
-    e.preventDefault();
-    if (isRecording) {
-      await stopRecordingAndSend();
-    }
-  };
-
   // 模式顯示標籤
-  const modeLabel = voiceMode === 'mock' ? '模擬' : voiceMode === 'rest-live' ? 'REST' : 'Gemini';
+  const modeLabel = voiceMode === 'mock' ? '模擬' : voiceMode === 'rest-live' ? 'WS' : 'Gemini';
 
   const getFlagStyle = (flagType) => {
     switch (flagType) {
@@ -226,7 +206,7 @@ export default function AgentView() {
                   <div className="h-full flex items-center justify-center text-slate-500">
                     <p className="text-sm">
                       {voiceMode === 'mock' ? '點擊「下一步」開始對話' :
-                       voiceMode === 'rest-live' ? '按住說話按鈕開始對話' :
+                       voiceMode === 'rest-live' ? '開始說話，WS 後端即時回應' :
                        '開始說話，Gemini 即時回應'}
                     </p>
                   </div>
@@ -275,52 +255,26 @@ export default function AgentView() {
                       <ArrowRight className="w-4 h-4" />
                     </button>
                   ) : voiceMode === 'rest-live' ? (
-                    /* REST Live — PTT 按鈕 */
+                    /* WS Live — 串流狀態（與 Gemini Live 相同操作模式） */
                     <div className="space-y-2">
-                      {isProcessing && (
-                        <div className="flex items-center justify-center gap-2 text-amber-300 text-sm py-1">
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>處理中...</span>
-                        </div>
-                      )}
-                      {isPlaying && (
-                        <div className="flex items-center justify-center gap-2 text-cyan-300 text-sm py-1">
-                          <Volume2 className="w-4 h-4 animate-pulse" />
-                          <span>AI 回應播放中</span>
-                        </div>
-                      )}
-                      <button
-                        onMouseDown={handlePTTStart}
-                        onMouseUp={handlePTTEnd}
-                        onMouseLeave={handlePTTEnd}
-                        onTouchStart={handlePTTStart}
-                        onTouchEnd={handlePTTEnd}
-                        disabled={isProcessing || isPlaying}
-                        className={`w-full py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                          isRecording
-                            ? 'bg-red-500 text-white scale-[1.02]'
-                            : isProcessing || isPlaying
-                            ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                            : 'bg-indigo-500 hover:bg-indigo-600 text-white'
-                        }`}
-                      >
-                        {isRecording ? (
+                      <div className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 text-sm ${
+                        isStreaming
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                          : 'bg-slate-700/50 text-slate-400'
+                      }`}>
+                        {isStreaming ? (
                           <>
-                            <Mic className="w-4 h-4 animate-pulse" />
-                            <span>鬆開發送</span>
-                            {audioLevel > 0 && (
-                              <div className="w-16 h-1.5 bg-red-300/30 rounded-full overflow-hidden">
-                                <div className="h-full bg-white rounded-full transition-all" style={{ width: `${Math.min(audioLevel * 100, 100)}%` }} />
-                              </div>
-                            )}
+                            <Radio className="w-4 h-4 animate-pulse" />
+                            <span>WS 對話串流中</span>
+                            <Mic className="w-3 h-3 animate-pulse" />
                           </>
                         ) : (
                           <>
-                            <Mic className="w-4 h-4" />
-                            <span>按住說話 (PTT)</span>
+                            <Wifi className="w-4 h-4" />
+                            <span>WS 連線就緒 — 直接語音對話</span>
                           </>
                         )}
-                      </button>
+                      </div>
                     </div>
                   ) : (
                     /* Gemini Live — 串流狀態 */

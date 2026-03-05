@@ -6,6 +6,7 @@ import TicketPanel from '../components/TicketPanel';
 import SystemLogPanel from '../components/SystemLogPanel';
 import LatencyMonitor from '../components/LatencyMonitor';
 import GeminiLivePanel from '../components/GeminiLivePanel';
+import RestWsPanel from '../components/RestWsPanel';
 import { useCall } from '../context/CallContext';
 import { Phone, Zap, Building2, UtensilsCrossed, Hotel } from 'lucide-react';
 
@@ -113,6 +114,9 @@ export default function DemoView() {
 
               {/* Gemini Live 面板 (僅在 Gemini 模式顯示) */}
               <GeminiLivePanel />
+
+              {/* REST WS 面板 (僅在 WS Live 模式顯示) */}
+              <RestWsPanel />
 
               {/* 系統 Log */}
               <div className="flex-shrink-0">

@@ -33,16 +33,8 @@ export default function ConsumerView() {
     isProcessing,
     error,
     clearError,
-    // Gemini Live 串流
+    // Gemini Live / WS Live 串流
     isStreaming,
-    // 錄音相關
-    isRecording,
-    audioLevel,
-    micPermission,
-    micError,
-    startRecording,
-    stopRecordingAndSend,
-    requestMicPermission,
     // 播放相關
     isPlaying
   } = useCall();
@@ -58,24 +50,9 @@ export default function ConsumerView() {
 
   const IconComponent = scenario ? iconMap[scenario.icon] : null;
 
-  // PTT 按鈕處理
-  const handlePTTStart = async (e) => {
-    e.preventDefault();
-    if (voiceMode !== 'mock' && callState === 'connected' && !isProcessing) {
-      await startRecording();
-    }
-  };
-
-  const handlePTTEnd = async (e) => {
-    e.preventDefault();
-    if (isRecording) {
-      await stopRecordingAndSend();
-    }
-  };
-
   // 錯誤提示元件
   const ErrorBanner = () => {
-    const displayError = error || micError;
+    const displayError = error;
     if (!displayError) return null;
 
     return (
@@ -201,18 +178,6 @@ export default function ConsumerView() {
                      voiceMode === 'rest-live' ? 'REST 即時模式' : '演示模式'}
                   </div>
 
-                  {/* Live 模式麥克風權限提示 */}
-                  {voiceMode !== 'mock' && micPermission === 'denied' && (
-                    <div className="mt-3 text-red-400 text-sm text-center">
-                      <p>麥克風權限被拒絕</p>
-                      <button
-                        onClick={requestMicPermission}
-                        className="mt-1 text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
-                      >
-                        重新申請權限
-                      </button>
-                    </div>
-                  )}
                 </div>
 
                 <div className="p-8">
@@ -257,7 +222,7 @@ export default function ConsumerView() {
                   <h3 className="text-lg font-bold text-white mt-2">{scenario.name}</h3>
                   <p className="text-emerald-400 text-sm flex items-center justify-center gap-1">
                     {isPlaying && <Volume2 className="w-3 h-3 animate-pulse" />}
-                    {isProcessing ? '處理中...' : isRecording ? '錄音中...' : isPlaying ? '播放中' : isStreaming ? '即時串流中' : '通話中'}
+                    {isProcessing ? '處理中...' : isPlaying ? '播放中' : isStreaming ? '即時串流中' : '通話中'}
                   </p>
                 </div>
 
@@ -268,17 +233,10 @@ export default function ConsumerView() {
                 >
                   {displayedConversations.length === 0 && voiceMode !== 'mock' && (
                     <div className="text-center text-slate-500 text-sm py-8">
-                      {voiceMode === 'gemini-live' ? (
-                        <>
-                          <p>🎙️ 即時串流已啟動</p>
-                          <p className="mt-1">直接說話即可，AI 會自動回應</p>
-                        </>
-                      ) : (
-                        <>
-                          <p>按住下方麥克風按鈕說話</p>
-                          <p className="mt-1">放開後自動送出</p>
-                        </>
-                      )}
+                      <>
+                        <p>🎙️ 即時串流已啟動</p>
+                        <p className="mt-1">直接說話即可，AI 會自動回應</p>
+                      </>
                     </div>
                   )}
                   {displayedConversations.map((conv, idx) => (
@@ -323,49 +281,24 @@ export default function ConsumerView() {
                         ? `下一步 (${conversationIndex + 2}/${scenario?.conversations.length})`
                         : '結束通話'}
                     </button>
-                  ) : voiceMode === 'gemini-live' ? (
-                    // Gemini Live 模式 - 串流狀態指示器 (不需要 PTT)
-                    <div className="flex items-center justify-center gap-3 py-3 px-4 bg-slate-800/50 rounded-xl border border-purple-500/20">
+                  ) : (
+                    // Gemini Live / WS Live 模式 - 串流狀態指示器 (不需要 PTT)
+                    <div className={`flex items-center justify-center gap-3 py-3 px-4 bg-slate-800/50 rounded-xl border ${
+                      voiceMode === 'gemini-live' ? 'border-purple-500/20' : 'border-cyan-500/20'
+                    }`}>
                       <div className="relative flex items-center justify-center">
-                        <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse" />
-                        <div className="absolute w-6 h-6 bg-purple-500/20 rounded-full animate-ping" />
+                        <div className={`w-3 h-3 rounded-full animate-pulse ${
+                          voiceMode === 'gemini-live' ? 'bg-purple-500' : 'bg-cyan-500'
+                        }`} />
+                        <div className={`absolute w-6 h-6 rounded-full animate-ping ${
+                          voiceMode === 'gemini-live' ? 'bg-purple-500/20' : 'bg-cyan-500/20'
+                        }`} />
                       </div>
-                      <span className="text-sm text-purple-300 font-medium">
+                      <span className={`text-sm font-medium ${
+                        voiceMode === 'gemini-live' ? 'text-purple-300' : 'text-cyan-300'
+                      }`}>
                         {isPlaying ? '🔊 AI 回應中...' : '🎤 聆聽中 — 直接說話'}
                       </span>
-                    </div>
-                  ) : (
-                    // REST Live 模式 - PTT 按鈕
-                    <div className="relative">
-                      {/* 音量指示器 */}
-                      {isRecording && (
-                        <div className="absolute -top-2 left-0 right-0 h-1 bg-slate-700 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-green-500 transition-all duration-75"
-                            style={{ width: `${audioLevel * 100}%` }}
-                          />
-                        </div>
-                      )}
-                      <button
-                        onMouseDown={handlePTTStart}
-                        onMouseUp={handlePTTEnd}
-                        onMouseLeave={handlePTTEnd}
-                        onTouchStart={handlePTTStart}
-                        onTouchEnd={handlePTTEnd}
-                        disabled={isProcessing}
-                        className={`w-full py-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer select-none ${
-                          isRecording
-                            ? 'bg-green-500 text-white scale-[1.02]'
-                            : isProcessing
-                            ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-                            : 'bg-slate-700 hover:bg-slate-600 text-white active:bg-green-500 active:scale-[1.02]'
-                        }`}
-                      >
-                        <Mic className={`w-5 h-5 ${isRecording ? 'animate-pulse' : ''}`} />
-                        <span className="font-medium">
-                          {isRecording ? '放開送出' : isProcessing ? '處理中...' : '按住說話'}
-                        </span>
-                      </button>
                     </div>
                   )}
 

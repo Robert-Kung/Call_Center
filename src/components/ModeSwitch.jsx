@@ -12,11 +12,11 @@ const MODES = [
   },
   {
     id: 'rest-live',
-    label: 'REST',
-    shortLabel: 'REST',
+    label: 'WS Live',
+    shortLabel: 'WS',
     icon: Wifi,
     color: 'green',
-    description: '連接 ASR→LLM→TTS 語音服務。'
+    description: '自定義後端 WebSocket 串流模式，後端負責 VAD + ASR→LLM→TTS。'
   },
   {
     id: 'gemini-live',

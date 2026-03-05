@@ -2,8 +2,8 @@ import React, { createContext, useContext, useState, useCallback, useRef, useEff
 import { scenarios } from '../data/scenarios';
 import { voiceService } from '../services/VoiceService';
 import { sessionLogger } from '../services/SessionLogger';
-import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useAudioPlayer } from '../hooks/useAudioPlayer';
+import { REST_WS_CONFIG } from '../config/api';
 
 const CallContext = createContext(null);
 
@@ -51,7 +51,6 @@ export function CallProvider({ children }) {
   const voiceServiceRef = useRef(voiceService);
 
   // Audio hooks
-  const audioRecorder = useAudioRecorder();
   const audioPlayer = useAudioPlayer();
 
   // 取得當前場景
@@ -152,53 +151,169 @@ export function CallProvider({ children }) {
     }, 1500);
   }, [selectedScenarioId, addLog]);
 
-  // Live 模式撥號
-  const dialLive = useCallback(async () => {
+  // REST WebSocket 模式撥號 (仿 Gemini Live 模式)
+  const dialRestWs = useCallback(async () => {
     if (!selectedScenarioId || !scenario) return;
 
     setCallState('dialing');
     setConnectionStatus('connecting');
     setError(null);
 
-    // 先請求麥克風權限，被拒絕就中斷撥號
+    // 先請求麥克風權限並取得 MediaStream
     addLog('正在請求麥克風權限...', 'system');
+    let micStream;
     try {
-      const granted = await audioRecorder.requestPermission();
-      if (!granted) {
-        setCallState('idle');
-        setConnectionStatus('disconnected');
-        setError('麥克風權限被拒絕，無法進行語音通話');
-        addLog('麥克風權限被拒絕，撥號中止', 'error');
-        return;
-      }
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      mediaStreamRef.current = micStream;
       addLog('麥克風權限已取得', 'info');
     } catch (micErr) {
+      console.error('Mic permission error:', micErr);
       setCallState('idle');
       setConnectionStatus('disconnected');
-      setError('無法取得麥克風權限');
-      addLog('麥克風權限請求失敗，撥號中止', 'error');
+      setError('麥克風權限被拒絕，無法進行語音通話');
+      addLog('麥克風權限被拒絕，撥號中止', 'error');
       return;
     }
 
-    addLog('正在連接語音服務...', 'system');
+    addLog('正在連接 REST WebSocket 服務...', 'system');
 
     try {
-      const response = await voiceServiceRef.current.initializeCall(scenario);
+      // 取得 RestWebSocketService 實例並注入 callbacks
+      const restWsService = voiceServiceRef.current.getRestWsService();
+
+      // ---- 每輪對話完成 ----
+      restWsService.onResponseComplete = (response) => {
+        console.log('[CallContext] REST WS 回應完成 — user:', response.userText, 'ai:', response.aiText);
+
+        if (response.userText && response.userText.trim()) {
+          setDisplayedConversations(prev => [...prev, {
+            id: uid(),
+            speaker: 'customer',
+            text: response.userText
+          }]);
+          addLog(`語音辨識: "${response.userText}"`, 'ai');
+        }
+
+        if (response.aiText && response.aiText.trim()) {
+          setDisplayedConversations(prev => [...prev, {
+            id: uid(),
+            speaker: 'ai',
+            text: response.aiText
+          }]);
+          addLog(`AI 回應: "${response.aiText.substring(0, 30)}..."`, 'ai');
+        }
+
+        // 播放 AI 回應音訊 (PCM) — 播放期間暫停麥克風輸入防止回音
+        if (response.audio) {
+          restWsService.setSuppressInput(true);
+          audioPlayer.playAudio(response.audio, {
+            isPCM: true,
+            sampleRate: REST_WS_CONFIG.audio.outputSampleRate,
+            onEnd: () => {
+              restWsService.setSuppressInput(false);
+            }
+          });
+        }
+
+        // 更新延遲指標
+        if (response.latency) {
+          setLatencyMetrics(response.latency);
+          const { asr, llm, tts, total } = response.latency;
+          addLog(`延遲: ASR ${asr}ms, LLM ${llm}ms, TTS ${tts}ms, 共 ${total}ms`, 'info');
+        }
+      };
+
+      // ---- 打斷 ----
+      restWsService.onInterrupted = () => {
+        console.log('[CallContext] REST WS 被中斷');
+        audioPlayer.stopPlayback();
+        restWsService.setSuppressInput(false);
+        addLog('AI 回應被中斷', 'info');
+      };
+
+      // ---- 錯誤 ----
+      restWsService.onError = (err) => {
+        console.error('[CallContext] REST WS 錯誤:', err);
+        setError(err.message);
+        addLog(`REST WS 錯誤: ${err.message}`, 'error');
+      };
+
+      // ---- 連線狀態 ----
+      restWsService.onConnectionChange = (status) => {
+        console.log('[CallContext] REST WS 連線狀態:', status);
+        setConnectionStatus(status);
+        if (status === 'disconnected' && callState === 'connected') {
+          addLog('REST WebSocket 連線中斷', 'warning');
+        }
+      };
+
+      // ---- 意圖分析 ----
+      restWsService.onAnalysis = (data) => {
+        const analysis = {
+          intent:     data.intent     || '未知',
+          confidence: data.confidence || 0,
+          entities:   data.entities   || [],
+          flags:      data.flags      || [],
+          flagTypes:  data.flagTypes  || []
+        };
+        setCurrentAnalysis(analysis);
+        addLog(`🔍 意圖分析: ${analysis.intent} (${(analysis.confidence * 100).toFixed(0)}%)`, 'ai');
+        if (analysis.entities.length > 0) {
+          addLog(`  實體: ${analysis.entities.join(', ')}`, 'info');
+        }
+        analysis.flags.forEach((flag, idx) => {
+          const flagType = analysis.flagTypes?.[idx] || 'warning';
+          addLog(`  標記: ${flag}`, flagType);
+        });
+      };
+
+      // ---- 工單建立 ----
+      restWsService.onTicketCreated = (ticketData) => {
+        const ticket = {
+          id:          uid(),
+          type:        ticketData.type        || '服務單',
+          ticketId:    ticketData.ticketId    || `TKT-${Date.now()}`,
+          summary:     ticketData.summary     || '',
+          customerName: ticketData.customerName || '',
+          contactPhone: ticketData.contactPhone || '',
+          priority:    ticketData.priority    || '一般',
+          status:      ticketData.status      || '已建立',
+          ...ticketData
+        };
+        setTickets(prev => [...prev, ticket]);
+        addLog(`✓ ${ticket.type}已建立: ${ticket.ticketId}`, 'success');
+      };
+
+      // 初始化 (連線 + setup + 歡迎語)
+      const response = await voiceServiceRef.current.initializeCallRestWs(scenario);
 
       setSessionId(response.sessionId);
       setCallState('connected');
       setConnectionStatus('connected');
 
-      addLog('通話已接通 (即時模式)', 'success');
+      addLog('通話已接通 (REST WebSocket)', 'success');
       addLog(`Session ID: ${response.sessionId}`, 'system');
-      addLog('ASR 引擎就緒: Whisper (本地)', 'system');
-      addLog('LLM 模型就緒: 本地 LLM', 'system');
-      addLog('TTS 引擎就緒: CosyVoice', 'system');
+      addLog('即時串流模式: 後端 VAD 偵測', 'system');
 
-      // 播放歡迎語音
+      // 播放歡迎語音 (PCM)
+      const restSvc = voiceServiceRef.current.getRestWsService();
       if (response.audio_base64) {
-        audioPlayer.playAudio(response.audio_base64);
-        addLog('播放歡迎語音', 'info');
+        restSvc.setSuppressInput(true);
+        audioPlayer.playAudio(response.audio_base64, {
+          isPCM: true,
+          sampleRate: REST_WS_CONFIG.audio.outputSampleRate,
+          onEnd: () => {
+            restSvc.setSuppressInput(false);
+          }
+        });
+        addLog(`播放歡迎語音 (PCM ${REST_WS_CONFIG.audio.outputSampleRate}Hz)`, 'info');
       }
 
       // 加入 AI 歡迎語到對話
@@ -212,17 +327,29 @@ export function CallProvider({ children }) {
 
       // 更新延遲
       if (response.latency) {
-        setLatencyMetrics(response.latency);
+        setLatencyMetrics(prev => ({ ...prev, ...response.latency }));
       }
 
+      // 開始持續串流麥克風音訊
+      await voiceServiceRef.current.startRestWsStreaming(micStream);
+      setIsStreaming(true);
+      addLog('即時串流已啟動 — 直接說話即可', 'success');
+
     } catch (err) {
-      console.error('Dial live error:', err);
+      console.error('Dial REST WS error:', err);
       setConnectionStatus('error');
       setError(err.message);
       setCallState('idle');
-      addLog(`連接失敗: ${err.message}`, 'error');
+      setIsStreaming(false);
+      addLog(`REST WS 連接失敗: ${err.message}`, 'error');
+
+      // 清理 mediaStream
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(t => t.stop());
+        mediaStreamRef.current = null;
+      }
     }
-  }, [selectedScenarioId, scenario, addLog, audioPlayer, audioRecorder]);
+  }, [selectedScenarioId, scenario, addLog, audioPlayer, callState]);
 
   // Gemini Live 模式撥號
   const dialGeminiLive = useCallback(async () => {
@@ -345,22 +472,37 @@ export function CallProvider({ children }) {
         console.log('[CallContext] 🔧 Tool Call:', name, 'id:', id, args);
 
         if (name === 'analyze_intent') {
+          // 正規化 entities：trim 空白、去除空字串
+          const entities = (args.entities || [])
+            .map(e => (typeof e === 'string' ? e.trim() : ''))
+            .filter(e => e.length > 0);
+
+          // 正規化 flags：過濾字面量「無」和空值
+          const rawFlags = args.flags || [];
+          const flags = rawFlags.filter(
+            f => f && typeof f === 'string' && f.trim() !== '' && f.trim() !== '無'
+          );
+
+          // 正規化 flagTypes：對齊 flags 長度，不足補 'info'
+          const rawFlagTypes = args.flagTypes || [];
+          const flagTypes = flags.map((_, i) => rawFlagTypes[i] || 'info');
+
           // 更新 AI 意圖分析面板
           const analysis = {
             intent: args.intent || '未知',
             confidence: args.confidence || 0,
-            entities: args.entities || [],
-            flags: args.flags || [],
-            flagTypes: args.flagTypes || []
+            entities,
+            flags,
+            flagTypes
           };
           setCurrentAnalysis(analysis);
           addLog(`🔍 意圖分析: ${analysis.intent} (${(analysis.confidence * 100).toFixed(0)}%)`, 'ai');
           if (analysis.entities.length > 0) {
             addLog(`  實體: ${analysis.entities.join(', ')}`, 'info');
           }
-          if (analysis.flags && analysis.flags.length > 0) {
+          if (analysis.flags.length > 0) {
             analysis.flags.forEach((flag, idx) => {
-              const flagType = analysis.flagTypes?.[idx] || 'warning';
+              const flagType = analysis.flagTypes[idx] || 'warning';
               addLog(`  標記: ${flag}`, flagType);
             });
           }
@@ -377,20 +519,26 @@ export function CallProvider({ children }) {
         }
 
         if (name === 'create_ticket') {
-          // 解析 details 欄位（可能是 JSON 字串）
+          // 解析 details 欄位（支援物件或 JSON 字串）
           let parsedDetails = {};
           if (args.details) {
-            try {
-              parsedDetails = typeof args.details === 'string' ? JSON.parse(args.details) : args.details;
-            } catch {
-              parsedDetails = { raw: args.details };
+            if (typeof args.details === 'object') {
+              parsedDetails = args.details;
+            } else {
+              try { parsedDetails = JSON.parse(args.details); } catch { parsedDetails = { raw: args.details }; }
             }
           }
+
+          // 依場景前綴自動生成 ticketId
+          const _prefixMap = { '網路報修單': 'CHT', '費用查詢單': 'CHT', '方案變更單': 'CHT', '訂位單': 'RES', '訂房單': 'HTL' };
+          const _prefix = _prefixMap[args.type] || 'TKT';
+          const _dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          const _autoId = `${_prefix}-${_dateStr}-${String(++_uidCounter).padStart(4, '0')}`;
 
           const ticket = {
             id: uid(),
             type: args.type || '服務單',
-            ticketId: args.ticketId || `TKT-${Date.now()}`,
+            ticketId: (args.ticketId && args.ticketId.trim()) ? args.ticketId.trim() : _autoId,
             summary: args.summary || '',
             customerName: args.customerName || '',
             contactPhone: args.contactPhone || '',
@@ -489,102 +637,27 @@ export function CallProvider({ children }) {
         dialGeminiLive();
         break;
       case 'rest-live':
-        dialLive();
+        dialRestWs();
         break;
       case 'mock':
       default:
         dialMock();
         break;
     }
-  }, [voiceMode, dialGeminiLive, dialLive, dialMock]);
-
-  // 傳送音訊到後端 (REST Live 模式專用)
-  const sendAudio = useCallback(async (audioBlob) => {
-    if (voiceMode !== 'rest-live' || callState !== 'connected' || !scenario) {
-      return;
-    }
-
-    setIsProcessing(true);
-    addLog('處理語音中...', 'system');
-
-    try {
-      const response = await voiceServiceRef.current.processUserAudio(audioBlob, scenario);
-
-      // 加入使用者語音轉文字
-      if (response.user_text && response.user_text.trim()) {
-        setDisplayedConversations(prev => [...prev, {
-          id: uid(),
-          speaker: 'customer',
-          text: response.user_text
-        }]);
-        addLog(`ASR 辨識: "${response.user_text}"`, 'ai');
-      }
-
-      // 加入 AI 回應
-      if (response.ai_text) {
-        setDisplayedConversations(prev => [...prev, {
-          id: uid(),
-          speaker: 'ai',
-          text: response.ai_text
-        }]);
-        addLog(`AI 回應: "${response.ai_text.substring(0, 30)}..."`, 'ai');
-      }
-
-      // 更新延遲指標
-      if (response.latency) {
-        setLatencyMetrics(response.latency);
-        addLog(`延遲: ASR ${response.latency.asr}ms, LLM ${response.latency.llm}ms, TTS ${response.latency.tts}ms`, 'info');
-      }
-
-      // 播放 AI 回應音訊
-      if (response.audio_base64) {
-        audioPlayer.playAudio(response.audio_base64);
-      }
-
-    } catch (err) {
-      console.error('Send audio error:', err);
-      setError(err.message);
-      addLog(`處理失敗: ${err.message}`, 'error');
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [voiceMode, callState, scenario, addLog, audioPlayer]);
-
-  // 開始錄音 (REST Live 模式專用)
-  const startRecording = useCallback(async () => {
-    if (voiceMode !== 'rest-live' || callState !== 'connected') {
-      return;
-    }
-
-    if (audioPlayer.isPlaying) {
-      audioPlayer.stopPlayback();
-    }
-
-    await audioRecorder.startRecording();
-    addLog('開始錄音...', 'system');
-  }, [voiceMode, callState, audioRecorder, audioPlayer, addLog]);
-
-  // 停止錄音並傳送
-  const stopRecordingAndSend = useCallback(async () => {
-    const audioBlob = await audioRecorder.stopRecording();
-    addLog('錄音完成', 'system');
-
-    if (audioBlob) {
-      await sendAudio(audioBlob);
-    }
-  }, [audioRecorder, sendAudio, addLog]);
+  }, [voiceMode, dialGeminiLive, dialRestWs, dialMock]);
 
   // 掛斷
   const hangUp = useCallback(() => {
     // 停止所有進行中的音訊操作
-    if (audioRecorder.isRecording) {
-      audioRecorder.cancelRecording();
-    }
     audioPlayer.stopPlayback();
 
-    // 停止 Gemini Live 串流
+    // 停止即時串流 (Gemini 或 REST WS)
     if (isStreaming) {
-      voiceServiceRef.current.stopGeminiStreaming();
+      if (voiceMode === 'gemini-live') {
+        voiceServiceRef.current.stopGeminiStreaming();
+      } else if (voiceMode === 'rest-live') {
+        voiceServiceRef.current.stopRestWsStreaming();
+      }
       setIsStreaming(false);
     }
 
@@ -595,25 +668,34 @@ export function CallProvider({ children }) {
     }
 
     // 結束 SessionLogger 記錄
-    if (voiceMode === 'gemini-live') {
+    if (voiceMode === 'gemini-live' || voiceMode === 'rest-live') {
       sessionLogger.endSession();
     }
 
     // 結束 session (根據模式)
     if (sessionId) {
       if (voiceMode === 'gemini-live') {
-        // 清除回調
+        // 清除 Gemini callbacks
         const geminiService = voiceServiceRef.current.getGeminiLiveService();
         geminiService.onResponseComplete = null;
         geminiService.onInterrupted = null;
         geminiService.onError = null;
         geminiService.onConnectionChange = null;
         geminiService.onToolCall = null;
-
         voiceServiceRef.current.endGeminiSession();
         setGeminiConnectionStatus('disconnected');
       } else if (voiceMode === 'rest-live') {
-        voiceServiceRef.current.endSession();
+        // 清除 REST WS callbacks
+        const restWsService = voiceServiceRef.current.getRestWsService();
+        restWsService.onResponseComplete = null;
+        restWsService.onAudioChunk = null;
+        restWsService.onTranscript = null;
+        restWsService.onInterrupted = null;
+        restWsService.onError = null;
+        restWsService.onConnectionChange = null;
+        restWsService.onAnalysis = null;
+        restWsService.onTicketCreated = null;
+        voiceServiceRef.current.endRestWsSession();
       }
       setSessionId(null);
       setConnectionStatus('disconnected');
@@ -630,7 +712,7 @@ export function CallProvider({ children }) {
     if (voiceMode === 'gemini-live' && geminiTokenUsage.total > 0) {
       addLog(`Gemini Token 使用: ${geminiTokenUsage.total}`, 'info');
     }
-  }, [voiceMode, sessionId, isStreaming, audioRecorder, audioPlayer, addLog, formatDuration, callDuration, displayedConversations.length, tickets.length, geminiTokenUsage.total]);
+  }, [voiceMode, sessionId, isStreaming, audioPlayer, addLog, formatDuration, callDuration, displayedConversations.length, tickets.length, geminiTokenUsage.total]);
 
   // Mock 模式下一步對話
   const nextStep = useCallback(() => {
@@ -780,7 +862,11 @@ export function CallProvider({ children }) {
   const goBack = useCallback(() => {
     // 停止串流
     if (isStreaming) {
-      voiceServiceRef.current.stopGeminiStreaming();
+      if (voiceMode === 'gemini-live') {
+        voiceServiceRef.current.stopGeminiStreaming();
+      } else if (voiceMode === 'rest-live') {
+        voiceServiceRef.current.stopRestWsStreaming();
+      }
       setIsStreaming(false);
     }
     if (mediaStreamRef.current) {
@@ -789,7 +875,7 @@ export function CallProvider({ children }) {
     }
 
     // 結束 SessionLogger 記錄
-    if (voiceMode === 'gemini-live') {
+    if (voiceMode === 'gemini-live' || voiceMode === 'rest-live') {
       sessionLogger.endSession();
     }
 
@@ -805,7 +891,16 @@ export function CallProvider({ children }) {
         voiceServiceRef.current.endGeminiSession();
         setGeminiConnectionStatus('disconnected');
       } else if (voiceMode === 'rest-live') {
-        voiceServiceRef.current.endSession();
+        const restWsService = voiceServiceRef.current.getRestWsService();
+        restWsService.onResponseComplete = null;
+        restWsService.onAudioChunk = null;
+        restWsService.onTranscript = null;
+        restWsService.onInterrupted = null;
+        restWsService.onError = null;
+        restWsService.onConnectionChange = null;
+        restWsService.onAnalysis = null;
+        restWsService.onTicketCreated = null;
+        voiceServiceRef.current.endRestWsSession();
       }
     }
 
@@ -873,12 +968,6 @@ export function CallProvider({ children }) {
     geminiConnectionStatus,
     isStreaming,
 
-    // 錄音狀態
-    isRecording: audioRecorder.isRecording,
-    audioLevel: audioRecorder.audioLevel,
-    micPermission: audioRecorder.permissionStatus,
-    micError: audioRecorder.error,
-
     // 播放狀態
     isPlaying: audioPlayer.isPlaying,
 
@@ -896,12 +985,6 @@ export function CallProvider({ children }) {
     // 模式相關方法
     switchMode,
     clearError,
-
-    // 錄音相關方法
-    startRecording,
-    stopRecordingAndSend,
-    cancelRecording: audioRecorder.cancelRecording,
-    requestMicPermission: audioRecorder.requestPermission,
 
     // 播放相關方法
     stopPlayback: audioPlayer.stopPlayback

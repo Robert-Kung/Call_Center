@@ -3,7 +3,7 @@ import {
   Settings, Mic, Brain, Volume2, ArrowRight, Phone, PhoneOff,
   Activity, Clock, Database, Server, Cpu, MemoryStick, Zap,
   Building2, UtensilsCrossed, Hotel, CheckCircle, AlertTriangle,
-  Sparkles, Wifi, Radio, Loader2
+  Sparkles, Wifi, Radio
 } from 'lucide-react';
 import { useCall } from '../context/CallContext';
 
@@ -50,11 +50,7 @@ export default function SystemView() {
     voiceMode,
     isProcessing,
     isStreaming,
-    isRecording,
     isPlaying,
-    audioLevel,
-    startRecording,
-    stopRecordingAndSend,
     geminiConnectionStatus,
     geminiTokenUsage
   } = useCall();
@@ -315,29 +311,16 @@ export default function SystemView() {
                         <span className="text-indigo-400/60">({conversationIndex + 2}/{scenario.conversations.length})</span>
                       </button>
                     ) : voiceMode === 'rest-live' ? (
-                      <div className="space-y-2">
-                        {isProcessing && (
-                          <div className="flex items-center justify-center gap-2 text-amber-300 text-xs py-1">
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                            Processing...
-                          </div>
+                      <div className={`w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 border ${
+                        isStreaming
+                          ? 'bg-cyan-500/20 border-cyan-500/30 text-cyan-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-500'
+                      }`}>
+                        {isStreaming ? (
+                          <><Radio className="w-3 h-3 animate-pulse" /> WS Live Streaming Active</>
+                        ) : (
+                          <><Wifi className="w-3 h-3" /> WS Live Ready — Voice-Activated</>
                         )}
-                        <button
-                          onMouseDown={async (e) => { e.preventDefault(); if (!isProcessing && !isPlaying) await startRecording(); }}
-                          onMouseUp={async (e) => { e.preventDefault(); if (isRecording) await stopRecordingAndSend(); }}
-                          onMouseLeave={async (e) => { e.preventDefault(); if (isRecording) await stopRecordingAndSend(); }}
-                          disabled={isProcessing || isPlaying}
-                          className={`w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 transition-all cursor-pointer border ${
-                            isRecording
-                              ? 'bg-red-500/20 border-red-500/50 text-red-300'
-                              : isProcessing || isPlaying
-                              ? 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
-                              : 'bg-cyan-500/20 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/30'
-                          }`}
-                        >
-                          <Mic className={`w-4 h-4 ${isRecording ? 'animate-pulse' : ''}`} />
-                          {isRecording ? 'Recording... Release to Send' : 'Hold to Talk (PTT)'}
-                        </button>
                       </div>
                     ) : (
                       <div className={`w-full py-2.5 rounded-lg text-sm flex items-center justify-center gap-2 border ${
