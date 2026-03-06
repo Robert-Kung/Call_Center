@@ -18,14 +18,14 @@
  *     { error: { code, message } }
  *
  * 歡迎語:
- *   後端在 setupComplete 後自動推送（TODO: 待後端確認觸發方式）
- *   initialize() 在 setupComplete 後直接返回，歡迎語透過 onAudioChunk/onTranscript callback 接收
+ *   initialize() 在 setupComplete 後，自動以 clientContent 發送 WELCOME_MESSAGES 觸發語。
+ *   後端執行 process_turn → LLM → TTS，回應透過 onAudioChunk/onTranscript/onResponseComplete 接收。
  *
  * 流程:
- *   initialize(scenario) → startStreaming(mediaStream) → [callback driven] → stopStreaming() → close()
+ *   initialize(scenario) → sendTextMessage(welcome) → startStreaming(mediaStream) → [callback driven] → stopStreaming() → close()
  */
 
-import { REST_WS_CONFIG, GEMINI_SYSTEM_PROMPTS } from '../config/api';
+import { REST_WS_CONFIG, GEMINI_SYSTEM_PROMPTS, WELCOME_MESSAGES } from '../config/api';
 import { sessionLogger } from './SessionLogger';
 
 class RestWebSocketService {
@@ -73,6 +73,10 @@ class RestWebSocketService {
 
     // 回應計時
     this._responseStartTime = null;
+
+    // 歡迎回合旗標：發送 WELCOME_MESSAGES 的那一回合，
+    // 後端會把觸發語反送 inputTranscription，需抑制以免出現在對話紀錄
+    this._isWelcomeTurn = false;
   }
 
   // ==================== Public API ====================
@@ -110,9 +114,16 @@ class RestWebSocketService {
     sessionLogger.startSession(this.sessionId, scenario.id, scenario.name);
 
     const latency = Math.round(performance.now() - startTime);
-    console.log(`[RestWS] ✅ 初始化完成 (${latency}ms)，等待後端歡迎語...`);
+    console.log(`[RestWS] ✅ 初始化完成 (${latency}ms)，發送歡迎觸發語...`);
 
-    // 歡迎語由後端自動推送，透過 onAudioChunk/onTranscript/onResponseComplete 接收
+    // 發送 WELCOME_MESSAGES 觸發歡迎語，後端執行 process_turn → LLM → TTS
+    // 回應透過 onResponseComplete callback 接收（需在 initialize 前注入 callback）
+    // 設旗標：此回合的 inputTranscription 是系統指令，不應顯示在對話中
+    this._isWelcomeTurn = true;
+    const welcomePrompt = WELCOME_MESSAGES[scenario.id] || '通話開始。請主動問候客戶一次，之後等待客戶說話。';
+    this.sendTextMessage(welcomePrompt);
+    console.log(`[RestWS] >>> welcome clientContent (scenario: ${scenario.id})`);
+
     return {
       sessionId: this.sessionId,
       audioBase64: null,
@@ -242,6 +253,28 @@ class RestWebSocketService {
     this._scriptProcessor.connect(this._audioContext.destination);
 
     console.log('[RestWS] ✅ 音訊串流已啟動 (sampleRate=%d, bufferSize=%d)', this._actualSampleRate, bufferSize);
+  }
+
+  /**
+   * 發送文字訊息到後端 (clientContent 格式)
+   * 可用於：觸發歡迎語、傳遞系統指令、文字輸入測試
+   * @param {string} text - 文字內容
+   * @param {string} [role='user'] - 角色 ('user' | 'system')
+   */
+  sendTextMessage(text, role = 'user') {
+    if (!this.isConnected || !this.ws) {
+      console.warn('[RestWS] sendTextMessage 失敗：WebSocket 未連線');
+      return;
+    }
+    const message = {
+      clientContent: {
+        turns: [{ role, parts: [{ text }] }],
+        turnComplete: true
+      }
+    };
+    console.log(`[RestWS] >>> clientContent (role=${role}): ${text.substring(0, 60)}...`);
+    sessionLogger.log('client_text', { role, text: text.substring(0, 200) });
+    this._sendMessage(message);
   }
 
   /**
@@ -403,23 +436,28 @@ class RestWebSocketService {
 
   async _sendSetupMessage(scenario, systemPrompt) {
     const voiceId = scenario.voiceId || REST_WS_CONFIG.voice.default;
+    // Bug fix: 後端代理以 snake_case 讀取 generation_config / system_instruction，
+    // 原先 camelCase 鍵名導致後端查找失敗，系統 Prompt 永遠被忽略。
     const setupMessage = {
       setup: {
         model: `models/${import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025'}`,
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: voiceId }
+        generation_config: {
+          response_modalities: ['AUDIO'],
+          speech_config: {
+            voice_config: {
+              prebuilt_voice_config: { voice_name: voiceId }
             }
           },
-          thinkingConfig: { thinkingBudget: 0 }
+          thinking_config: { thinking_budget: 0 },
+          system_instruction: {
+            parts: [{ text: systemPrompt }]
+          }
         },
-        systemInstruction: {
+        system_instruction: {
           parts: [{ text: systemPrompt }]
         },
-        outputAudioTranscription: {},
-        inputAudioTranscription: {}
+        output_audio_transcription: {},
+        input_audio_transcription: {}
       }
     };
     console.log(`[RestWS] >>> setup (scenario: ${scenario.id}, voice: ${voiceId})`);
@@ -481,43 +519,67 @@ class RestWebSocketService {
             this.onAudioChunk?.(part.inlineData.data);
           }
           if (part.text) {
-            this.textBuffer += part.text;
+            // Bug fix: 後端每次傳送的是累積式全文（非 delta），用 = 覆寫而非 += 累加
+            this.textBuffer = part.text;
+            // Bug fix: 後端不發送 outputTranscription，改由 modelTurn.parts[].text 觸發即時字幕
+            console.log('[RestWS] 🔊 AI (streaming):', part.text);
+            sessionLogger.log('output_transcript', { text: part.text });
+            this.onTranscript?.({ type: 'output', text: part.text });
           }
         }
       }
 
-      // AI 輸出轉錄
+      // AI 輸出轉錄（outputTranscription）
+      // 注意：此後端代理不發送 outputTranscription，字幕已由上方 modelTurn.parts[].text 處理
       if (content.outputTranscription?.text) {
-        // 後端傳送的是累積式轉錄 (每次包含完整文字到目前為止)，
-        // 不是增量 delta — 用 = 取代而非 += 避免重複累加。
         this.outputTranscriptBuffer = content.outputTranscription.text;
-        console.log('[RestWS] 🔊 AI:', content.outputTranscription.text);
-        sessionLogger.log('output_transcript', { text: content.outputTranscription.text });
+        console.log('[RestWS] 🔊 AI (transcription):', content.outputTranscription.text);
+        sessionLogger.log('output_transcript_explicit', { text: content.outputTranscription.text });
         this.onTranscript?.({ type: 'output', text: content.outputTranscription.text });
       }
 
       // 使用者輸入轉錄
+      // 歡迎回合中後端會把觸發語反送 inputTranscription，跳過以免出現在對話紀錄
       if (content.inputTranscription?.text) {
-        this.inputTranscriptBuffer += content.inputTranscription.text;
-        console.log('[RestWS] 🎤 USER:', content.inputTranscription.text);
-        sessionLogger.log('input_transcript', { text: content.inputTranscription.text });
-        this.onTranscript?.({ type: 'input', text: content.inputTranscription.text });
+        if (this._isWelcomeTurn) {
+          console.log('[RestWS] 🔇 跳過歡迎回合 inputTranscription:', content.inputTranscription.text.substring(0, 40));
+        } else {
+          this.inputTranscriptBuffer += content.inputTranscription.text;
+          console.log('[RestWS] 🎤 USER:', content.inputTranscription.text);
+          sessionLogger.log('input_transcript', { text: content.inputTranscription.text });
+          this.onTranscript?.({ type: 'input', text: content.inputTranscription.text });
+        }
       }
 
       // 回合結束
       if (content.turnComplete) {
-        const latency = this._responseStartTime
+        // 歡迎回合結束後才開始正常記錄使用者輸入
+        this._isWelcomeTurn = false;
+
+        const clientE2E = this._responseStartTime
           ? Math.round(performance.now() - this._responseStartTime)
           : 0;
+
+        // 後端提供分段延遲 { asr_ms, llm_first_ms, tts_total_ms }，映射至前端欄位
+        let latency;
+        if (content.latency) {
+          const { asr_ms = 0, llm_first_ms = 0, tts_total_ms = 0 } = content.latency;
+          const total = asr_ms + llm_first_ms + tts_total_ms;
+          latency = { asr: asr_ms, llm: llm_first_ms, tts: tts_total_ms, total, e2e: clientE2E };
+        } else {
+          // 後端未提供時 fallback 至前端計時
+          latency = { asr: 0, llm: 0, tts: 0, total: clientE2E, e2e: clientE2E };
+        }
 
         const response = {
           audio:    this._mergeBase64Audio(this.audioBuffer),
           aiText:   this.outputTranscriptBuffer || this.textBuffer,
           userText: this.inputTranscriptBuffer,
-          latency:  { total: latency, e2e: latency }
+          latency
         };
 
-        console.log('[RestWS] ✅ turnComplete (audio chunks: %d, latency: %dms)', this.audioBuffer.length, latency);
+        console.log('[RestWS] ✅ turnComplete (audio chunks: %d, ASR=%dms, LLM=%dms, TTS=%dms, total=%dms)',
+          this.audioBuffer.length, latency.asr, latency.llm, latency.tts, latency.total);
         console.log('[RestWS]   👤 USER:', response.userText || '(無)');
         console.log('[RestWS]   🤖 AI:', response.aiText || '(無)');
 

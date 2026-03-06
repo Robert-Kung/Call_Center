@@ -188,6 +188,35 @@ export function CallProvider({ children }) {
       // 取得 RestWebSocketService 實例並注入 callbacks
       const restWsService = voiceServiceRef.current.getRestWsService();
 
+      // 串流音訊計數：追蹤「已送出但尚未播完」的 chunk 數，
+      // 確保所有 chunk 播完 + turnComplete 後才解除麥克風抑制
+      let pendingAudioChunks = 0;
+      let turnComplete = false;
+
+      const tryReleaseSuppression = () => {
+        if (pendingAudioChunks === 0 && turnComplete) {
+          restWsService.setSuppressInput(false);
+          turnComplete = false; // 重置，準備下一輪
+        }
+      };
+
+      // ---- 即時音訊串流 (逐 chunk 播放，不等 turnComplete) ----
+      restWsService.onAudioChunk = (chunkBase64) => {
+        pendingAudioChunks++;
+        // 第一個 chunk 到達時開始抑制麥克風（防止回音）
+        if (pendingAudioChunks === 1) {
+          restWsService.setSuppressInput(true);
+        }
+        audioPlayer.playAudio(chunkBase64, {
+          isPCM: true,
+          sampleRate: REST_WS_CONFIG.audio.outputSampleRate,
+          onEnd: () => {
+            pendingAudioChunks--;
+            tryReleaseSuppression();
+          }
+        });
+      };
+
       // ---- 每輪對話完成 ----
       restWsService.onResponseComplete = (response) => {
         console.log('[CallContext] REST WS 回應完成 — user:', response.userText, 'ai:', response.aiText);
@@ -210,17 +239,10 @@ export function CallProvider({ children }) {
           addLog(`AI 回應: "${response.aiText.substring(0, 30)}..."`, 'ai');
         }
 
-        // 播放 AI 回應音訊 (PCM) — 播放期間暫停麥克風輸入防止回音
-        if (response.audio) {
-          restWsService.setSuppressInput(true);
-          audioPlayer.playAudio(response.audio, {
-            isPCM: true,
-            sampleRate: REST_WS_CONFIG.audio.outputSampleRate,
-            onEnd: () => {
-              restWsService.setSuppressInput(false);
-            }
-          });
-        }
+        // 音訊已由 onAudioChunk 逐 chunk 播放，此處只處理 suppress 釋放時機
+        // （若無音訊 chunk、或音訊已全部播完，直接解除抑制）
+        turnComplete = true;
+        tryReleaseSuppression();
 
         // 更新延遲指標
         if (response.latency) {
@@ -234,6 +256,9 @@ export function CallProvider({ children }) {
       restWsService.onInterrupted = () => {
         console.log('[CallContext] REST WS 被中斷');
         audioPlayer.stopPlayback();
+        // 重置串流計數，避免殘留值影響下一輪的 suppress 邏輯
+        pendingAudioChunks = 0;
+        turnComplete = false;
         restWsService.setSuppressInput(false);
         addLog('AI 回應被中斷', 'info');
       };
@@ -390,11 +415,38 @@ export function CallProvider({ children }) {
       // 設定 Gemini Live 回調（收到 AI 回應時觸發）
       const geminiService = voiceServiceRef.current.getGeminiLiveService();
 
+      // 追蹤播放中的 chunk 數量，用於 suppress 釋放時機判斷（同 REST WS 模式）
+      let pendingAudioChunks = 0;
+      let turnComplete = false;
+
+      const tryReleaseSuppression = () => {
+        if (pendingAudioChunks === 0 && turnComplete) {
+          geminiService.setSuppressInput(false);
+          turnComplete = false;
+        }
+      };
+
+      // ---- 即時音訊串流 (逐 chunk 播放，不等 turnComplete) ----
+      geminiService.onAudioChunk = (chunkBase64) => {
+        pendingAudioChunks++;
+        // 第一個 chunk 到達時開始抑制麥克風（防止回音）
+        if (pendingAudioChunks === 1) {
+          geminiService.setSuppressInput(true);
+        }
+        audioPlayer.playAudio(chunkBase64, {
+          isPCM: true,
+          sampleRate: 24000,
+          onEnd: () => {
+            pendingAudioChunks--;
+            tryReleaseSuppression();
+          }
+        });
+      };
+
       geminiService.onResponseComplete = (response) => {
         console.log('[CallContext] Gemini 回應完成:');
         console.log('[CallContext]   👤 USER:', response.userText || '(無)');
         console.log('[CallContext]   🤖 AI:', response.aiText || '(無)');
-        console.log('[CallContext]   🔊 audio:', response.audio?.length || 0, 'chunks, latency:', response.latency?.total, 'ms');
 
         // 加入使用者語音轉文字
         if (response.userText && response.userText.trim()) {
@@ -416,17 +468,9 @@ export function CallProvider({ children }) {
           addLog(`AI 回應: "${response.aiText.substring(0, 30)}..."`, 'ai');
         }
 
-        // 播放 AI 回應音訊 (PCM 24kHz) — 播放期間暫停麥克風輸入防止回音
-        if (response.audio && response.audio.length > 0) {
-          geminiService.setSuppressInput(true);
-          audioPlayer.playAudio(response.audio, {
-            isPCM: true,
-            sampleRate: 24000,
-            onEnd: () => {
-              geminiService.setSuppressInput(false);
-            }
-          });
-        }
+        // 音訊已由 onAudioChunk 逐 chunk 播放，此處只處理 suppress 釋放時機
+        turnComplete = true;
+        tryReleaseSuppression();
 
         // 更新延遲指標
         if (response.latency) {
@@ -448,7 +492,10 @@ export function CallProvider({ children }) {
       geminiService.onInterrupted = () => {
         console.log('[CallContext] Gemini 被中斷（使用者開始說話）');
         audioPlayer.stopPlayback();
-        geminiService.setSuppressInput(false);  // 中斷時恢復麥克風
+        // 重置串流計數，避免殘留值影響下一輪的 suppress 邏輯
+        pendingAudioChunks = 0;
+        turnComplete = false;
+        geminiService.setSuppressInput(false);
         addLog('AI 回應被中斷', 'info');
       };
 
@@ -672,34 +719,34 @@ export function CallProvider({ children }) {
       sessionLogger.endSession();
     }
 
-    // 結束 session (根據模式)
-    if (sessionId) {
-      if (voiceMode === 'gemini-live') {
-        // 清除 Gemini callbacks
-        const geminiService = voiceServiceRef.current.getGeminiLiveService();
-        geminiService.onResponseComplete = null;
-        geminiService.onInterrupted = null;
-        geminiService.onError = null;
-        geminiService.onConnectionChange = null;
-        geminiService.onToolCall = null;
-        voiceServiceRef.current.endGeminiSession();
-        setGeminiConnectionStatus('disconnected');
-      } else if (voiceMode === 'rest-live') {
-        // 清除 REST WS callbacks
-        const restWsService = voiceServiceRef.current.getRestWsService();
-        restWsService.onResponseComplete = null;
-        restWsService.onAudioChunk = null;
-        restWsService.onTranscript = null;
-        restWsService.onInterrupted = null;
-        restWsService.onError = null;
-        restWsService.onConnectionChange = null;
-        restWsService.onAnalysis = null;
-        restWsService.onTicketCreated = null;
-        voiceServiceRef.current.endRestWsSession();
-      }
-      setSessionId(null);
-      setConnectionStatus('disconnected');
+    // 結束 session (根據模式) — 無論 sessionId 是否已取得皆執行，
+    // 確保撥號連線中途掛斷時 WebSocket 也能被正確關閉。
+    if (voiceMode === 'gemini-live') {
+      // 清除 Gemini callbacks
+      const geminiService = voiceServiceRef.current.getGeminiLiveService();
+      geminiService.onAudioChunk = null;
+      geminiService.onResponseComplete = null;
+      geminiService.onInterrupted = null;
+      geminiService.onError = null;
+      geminiService.onConnectionChange = null;
+      geminiService.onToolCall = null;
+      voiceServiceRef.current.endGeminiSession();
+      setGeminiConnectionStatus('disconnected');
+    } else if (voiceMode === 'rest-live') {
+      // 清除 REST WS callbacks
+      const restWsService = voiceServiceRef.current.getRestWsService();
+      restWsService.onResponseComplete = null;
+      restWsService.onAudioChunk = null;
+      restWsService.onTranscript = null;
+      restWsService.onInterrupted = null;
+      restWsService.onError = null;
+      restWsService.onConnectionChange = null;
+      restWsService.onAnalysis = null;
+      restWsService.onTicketCreated = null;
+      voiceServiceRef.current.endRestWsSession();
     }
+    if (sessionId) setSessionId(null);
+    if (voiceMode !== 'mock') setConnectionStatus('disconnected');
 
     setCallState('ended');
     setIsProcessing(false);
@@ -713,6 +760,20 @@ export function CallProvider({ children }) {
       addLog(`Gemini Token 使用: ${geminiTokenUsage.total}`, 'info');
     }
   }, [voiceMode, sessionId, isStreaming, audioPlayer, addLog, formatDuration, callDuration, displayedConversations.length, tickets.length, geminiTokenUsage.total]);
+
+  // 伺服器端斷線自動掛斷
+  // 當 live 模式通話中 connectionStatus 變為 disconnected/error 時自動觸發 hangUp，
+  // 避免畫面卡在通話中但 WebSocket 已實際斷線的狀態。
+  // 注意：hangUp() 本身也會設 connectionStatus='disconnected'，但屆時
+  // callState 已為 'ended'，guard 會阻止重複觸發。
+  useEffect(() => {
+    if (voiceMode === 'mock') return;
+    if (callState !== 'connected' && callState !== 'dialing') return;
+    if (connectionStatus === 'disconnected' || connectionStatus === 'error') {
+      addLog('連線中斷，自動掛斷通話', 'warning');
+      hangUp();
+    }
+  }, [connectionStatus, callState, voiceMode, addLog, hangUp]);
 
   // Mock 模式下一步對話
   const nextStep = useCallback(() => {
@@ -883,6 +944,7 @@ export function CallProvider({ children }) {
     if (sessionId) {
       if (voiceMode === 'gemini-live') {
         const geminiService = voiceServiceRef.current.getGeminiLiveService();
+        geminiService.onAudioChunk = null;
         geminiService.onResponseComplete = null;
         geminiService.onInterrupted = null;
         geminiService.onError = null;

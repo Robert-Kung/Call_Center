@@ -419,7 +419,17 @@ class GeminiLiveService {
           functionDeclarations: GEMINI_TOOL_DECLARATIONS
         }],
         outputAudioTranscription: {},
-        inputAudioTranscription: {}
+        inputAudioTranscription: {},
+        // VAD 設定：調高靜音閾值，避免話中自然停頓誤觸發
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            silenceDurationMs: GEMINI_CONFIG.vad.silenceDurationMs,
+            prefixPaddingMs: GEMINI_CONFIG.vad.prefixPaddingMs,
+            endOfSpeechSensitivity: GEMINI_CONFIG.vad.endOfSpeechSensitivity,
+            startOfSpeechSensitivity: GEMINI_CONFIG.vad.startOfSpeechSensitivity
+          }
+        }
       }
     };
     console.log('[GeminiLive] Setup 包含 %d 個 tool declarations', GEMINI_TOOL_DECLARATIONS.length);
