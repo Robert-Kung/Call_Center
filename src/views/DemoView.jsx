@@ -18,7 +18,12 @@ const iconMap = {
 };
 
 export default function DemoView() {
-  const { scenario, callState, callDuration, formatDuration } = useCall();
+  const { scenario, callState, callDuration, formatDuration, voiceMode } = useCall();
+
+  // WS Live 無 function call，隱藏意圖分析與工單面板
+  const showFunctionCallPanels = voiceMode !== 'rest-live';
+  // Gemini Live / WS Live 各有自己的延遲面板，避免重複
+  const showLatencyMonitor = voiceMode === 'mock';
 
   return (
     <div className="h-full flex bg-slate-900">
@@ -97,25 +102,31 @@ export default function DemoView() {
 
             {/* 右欄 */}
             <div className="flex flex-col gap-4 overflow-hidden">
-              {/* 意圖分析 */}
-              <div className="h-[240px] flex-shrink-0">
-                <AnalysisPanel />
-              </div>
+              {/* 意圖分析（Mock / Gemini Live 才有 function call） */}
+              {showFunctionCallPanels && (
+                <div className="h-[240px] flex-shrink-0">
+                  <AnalysisPanel />
+                </div>
+              )}
 
-              {/* 產生單據 */}
-              <div className="flex-1 min-h-0">
-                <TicketPanel />
-              </div>
+              {/* 產生單據（Mock / Gemini Live 才有 function call） */}
+              {showFunctionCallPanels && (
+                <div className="flex-1 min-h-0">
+                  <TicketPanel />
+                </div>
+              )}
 
-              {/* 延遲監控 */}
-              <div className="flex-shrink-0">
-                <LatencyMonitor />
-              </div>
+              {/* 延遲監控（Mock 模式專用；Live 模式各自面板已含延遲資訊） */}
+              {showLatencyMonitor && (
+                <div className="flex-shrink-0">
+                  <LatencyMonitor />
+                </div>
+              )}
 
-              {/* Gemini Live 面板 (僅在 Gemini 模式顯示) */}
+              {/* Gemini Live 面板（含連線狀態 + E2E 延遲 + token 用量） */}
               <GeminiLivePanel />
 
-              {/* REST WS 面板 (僅在 WS Live 模式顯示) */}
+              {/* REST WS 面板（含連線狀態 + ASR/LLM/TTS 延遲） */}
               <RestWsPanel />
 
               {/* 系統 Log */}

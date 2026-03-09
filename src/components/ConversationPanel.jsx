@@ -9,17 +9,19 @@ export default function ConversationPanel({ showNextButton = true }) {
     displayedConversations,
     conversationIndex,
     nextStep,
-    voiceMode
+    voiceMode,
+    streamingAiText,
+    streamingUserText
   } = useCall();
 
   const chatContainerRef = useRef(null);
 
-  // 自動滾動到底部
+  // 自動滾動到底部（對話更新或串流文字更新時）
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [displayedConversations]);
+  }, [displayedConversations, streamingAiText, streamingUserText]);
 
   return (
     <div className="h-full flex flex-col bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-700/50 overflow-hidden">
@@ -44,7 +46,7 @@ export default function ConversationPanel({ showNextButton = true }) {
         ref={chatContainerRef}
         className="flex-1 overflow-y-auto p-4 space-y-4"
       >
-        {displayedConversations.length === 0 ? (
+        {displayedConversations.length === 0 && !streamingAiText && !streamingUserText ? (
           <div className="h-full flex flex-col items-center justify-center text-slate-500">
             <MessageSquare className="w-12 h-12 mb-3 opacity-30" />
             <p className="text-sm">
@@ -52,47 +54,93 @@ export default function ConversationPanel({ showNextButton = true }) {
             </p>
           </div>
         ) : (
-          displayedConversations.map((conv, idx) => (
-            <div
-              key={conv.id || idx}
-              className={`flex ${conv.speaker === 'customer' ? 'justify-start' : 'justify-end'}`}
-            >
+          <>
+            {displayedConversations.map((conv, idx) => (
               <div
-                className={`max-w-[85%] flex gap-2 ${
-                  conv.speaker === 'customer' ? 'flex-row' : 'flex-row-reverse'
-                }`}
+                key={conv.id || idx}
+                className={`flex ${conv.speaker === 'customer' ? 'justify-start' : 'justify-end'}`}
               >
-                {/* 頭像 */}
                 <div
-                  className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center ${
-                    conv.speaker === 'customer'
-                      ? 'bg-slate-600'
-                      : 'bg-gradient-to-br from-indigo-500 to-purple-500'
+                  className={`max-w-[85%] flex gap-2 ${
+                    conv.speaker === 'customer' ? 'flex-row' : 'flex-row-reverse'
                   }`}
                 >
-                  {conv.speaker === 'customer' ? (
-                    <User className="w-4 h-4 text-slate-300" />
-                  ) : (
-                    <Bot className="w-4 h-4 text-white" />
-                  )}
-                </div>
-
-                {/* 訊息氣泡 */}
-                <div
-                  className={`px-4 py-3 rounded-2xl ${
-                    conv.speaker === 'customer'
-                      ? 'bg-slate-700 text-slate-100 rounded-bl-md'
-                      : 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-br-md'
-                  }`}
-                >
-                  <div className="text-xs opacity-70 mb-1 font-medium">
-                    {conv.speaker === 'customer' ? '客戶' : 'AI 助理'}
+                  {/* 頭像 */}
+                  <div
+                    className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center ${
+                      conv.speaker === 'customer'
+                        ? 'bg-slate-600'
+                        : 'bg-gradient-to-br from-indigo-500 to-purple-500'
+                    }`}
+                  >
+                    {conv.speaker === 'customer' ? (
+                      <User className="w-4 h-4 text-slate-300" />
+                    ) : (
+                      <Bot className="w-4 h-4 text-white" />
+                    )}
                   </div>
-                  <p className="text-sm leading-relaxed">{conv.text}</p>
+
+                  {/* 訊息氣泡 */}
+                  <div
+                    className={`px-4 py-3 rounded-2xl ${
+                      conv.speaker === 'customer'
+                        ? 'bg-slate-700 text-slate-100 rounded-bl-md'
+                        : 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-br-md'
+                    }`}
+                  >
+                    <div className="text-xs opacity-70 mb-1 font-medium">
+                      {conv.speaker === 'customer' ? '客戶' : 'AI 助理'}
+                    </div>
+                    <p className="text-sm leading-relaxed">{conv.text}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            ))}
+
+            {/* 使用者語音轉錄氣泡（說話時即時顯示，turnComplete 後由正式訊息取代）*/}
+            {streamingUserText && (
+              <div className="flex justify-start">
+                <div className="max-w-[85%] flex gap-2 flex-row">
+                  <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center bg-slate-600">
+                    <User className="w-4 h-4 text-slate-300" />
+                  </div>
+                  <div className="px-4 py-3 rounded-2xl bg-slate-700/80 text-slate-100 rounded-bl-md border border-slate-600/40">
+                    <div className="text-xs opacity-70 mb-1 font-medium flex items-center gap-1">
+                      客戶
+                      <span className="inline-flex gap-0.5 ml-1">
+                        <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </span>
+                    </div>
+                    <p className="text-sm leading-relaxed">{streamingUserText}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* AI 串流文字氣泡（Gemini Live 即時顯示，turnComplete 後由上方訊息取代）*/}
+            {streamingAiText && (
+              <div className="flex justify-end">
+                <div className="max-w-[85%] flex gap-2 flex-row-reverse">
+                  <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-500">
+                    <Bot className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="px-4 py-3 rounded-2xl bg-gradient-to-br from-indigo-500/80 to-indigo-600/80 text-white rounded-br-md border border-indigo-400/40">
+                    <div className="text-xs opacity-70 mb-1 font-medium flex items-center gap-1">
+                      AI 助理
+                      <span className="inline-flex gap-0.5 ml-1">
+                        <span className="w-1 h-1 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1 h-1 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1 h-1 bg-white/70 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </span>
+                    </div>
+                    <p className="text-sm leading-relaxed">{streamingAiText}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

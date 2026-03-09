@@ -544,16 +544,16 @@ class GeminiLiveService {
             aiText: this.outputTranscriptBuffer || this.textBuffer,
             userText: this.inputTranscriptBuffer,
             latency: {
-              ttfc: this._ttfc,           // 使用者說完 → 首個 AI chunk
-              streamDuration,             // 首個 AI chunk → turnComplete
-              total: e2e + streamDuration,
-              e2e                         // 對外顯示的主要延遲指標
+              ttfc: this._ttfc,                              // 使用者說完 → 首個 AI chunk
+              streamDuration,                                // 首個 AI chunk → turnComplete
+              total: (this._ttfc ?? 0) + streamDuration,    // ttfc=null 時 total = streamDuration
+              e2e                                            // 對外顯示的主要延遲指標
             },
             tokenUsage: this._extractTokenUsage(message.usageMetadata)
           };
 
-          console.log('[GeminiLive] turnComplete ✓ (audio chunks: %d, latency: %dms)',
-            this.audioBuffer.length, latency);
+          console.log('[GeminiLive] turnComplete ✓ (audio chunks: %d, ttfc: %dms, stream: %dms)',
+            this.audioBuffer.length, this._ttfc ?? 0, streamDuration);
           console.log('[GeminiLive]   👤 USER:', response.userText || '(無)');
           console.log('[GeminiLive]   🤖 AI:', response.aiText || '(無)');
 
@@ -563,7 +563,7 @@ class GeminiLiveService {
             aiText: response.aiText,
             audioChunks: this.audioBuffer.length,
             audioLength: response.audio.length,
-            latency,
+            latency: response.latency,
             tokenUsage: response.tokenUsage
           });
 
@@ -636,14 +636,15 @@ class GeminiLiveService {
     sessionLogger.log('function_call', { name, id, args });
 
     // === analyze_intent：更新 UI，送出 ack 給 Gemini ===
-    // behavior.scheduling='SILENT'：Gemini 收到 toolResponse 後靜默，不產生新語音回應
+    // scheduling='SILENT'：Gemini 收到 toolResponse 後靜默，不產生新語音回應
+    // 避免 toolResponse ack → 觸發第二次 turnComplete → 雙重語音播放
     if (name === 'analyze_intent') {
       if (this.onToolCall) {
         try { this.onToolCall({ name, args, id }); } catch (e) {
           console.error('[GeminiLive] ✗ onToolCall (analyze_intent) 錯誤:', e);
         }
       }
-      this._sendFunctionResponse(name, id, { status: 'ok' });
+      this._sendFunctionResponse(name, id, { status: 'ok', scheduling: 'SILENT' });
       sessionLogger.log('function_call_handled', { name, id, minimalAck: true });
       return;
     }

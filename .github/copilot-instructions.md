@@ -14,6 +14,9 @@
 - WS Live: `VoiceService` → `RestWebSocketService` ([src/services/RestWebSocketService.js](src/services/RestWebSocketService.js)) → WebSocket to backend proxy. Uses the **Gemini Live wire protocol**: `setup`→`setupComplete` handshake, `realtimeInput.audio` for mic streaming, `serverContent.*` for responses, `toolCall` for function calling.
 - Gemini Live: `VoiceService` → `GeminiLiveService` ([src/services/GeminiLiveService.js](src/services/GeminiLiveService.js)) opens a `BidiGenerateContent` WebSocket, streams mic audio, receives PCM audio + transcript via callbacks. Also handles `toolCall` messages for function calling.
 - Both WS Live and Gemini Live use continuous streaming (server-side VAD — no PTT). `isStreaming` in `CallContext` is shared by both modes. `useAudioRecorder` is removed.
+- **Gemini Live latency metrics** (from `GeminiLiveService.onTurnComplete`): `ttfc` (ms from user speech end → first AI audio chunk), `streamDuration` (ms from first chunk → turnComplete), `total = ttfc + streamDuration`. These replace the old single `e2e` field. `latencyMetrics.ttfc` and `latencyMetrics.streamDuration` are set in `CallContext` on each turn.
+- **Streaming AI text**: `CallContext` exposes `streamingAiText` (reset on each turn start, built up via `GeminiLiveService.onTranscript({type:'output', text})`). `ConversationPanel` renders a live typing bubble using this value; it disappears once `turn_complete` fires and the full message is appended to `displayedConversations`.
+- **DemoView panel visibility** is `voiceMode`-gated: `AnalysisPanel` + `TicketPanel` hidden for `rest-live` (no function calls); `LatencyMonitor` shown only for `mock` (Live modes have their own panels). `GeminiLivePanel` and `RestWsPanel` self-hide via `voiceMode` guard inside each component.
 - Function Calling: `GEMINI_TOOL_DECLARATIONS` in [src/config/api.js](src/config/api.js) defines two tools — `analyze_intent` (NON_BLOCKING, WHEN_IDLE — UI side-effect only, no toolResponse sent) and `create_ticket` (INTERRUPT — sends toolResponse). `CallContext.onToolCall` processes results and updates `currentAnalysis` / `tickets` state.
 - `REST_WS_CONFIG` in [src/config/api.js](src/config/api.js) controls WS Live settings (wsUrl, voice, audio sample rates, latency thresholds, connection timeout).
 - `SessionLogger` ([src/services/SessionLogger.js](src/services/SessionLogger.js)) records sessions (including `function_call` and `function_response` events) to `data/session-*.json` for debugging. On each save it also rebuilds `data/sessions-index.json`.
@@ -34,7 +37,7 @@
 ## Project-specific conventions
 - UI text and comments are Traditional Chinese; icons come from `lucide-react`.
 - Scenario content and prompts must stay in sync: update [src/data/scenarios.js](src/data/scenarios.js) and [src/config/api.js](src/config/api.js) together.
-- Gemini config (model, voice, audio format, latency thresholds) lives in `GEMINI_CONFIG` in [src/config/api.js](src/config/api.js).
+- Gemini config (model, voice, audio format, latency thresholds) lives in `GEMINI_CONFIG` in [src/config/api.js](src/config/api.js). Latency threshold key for Gemini is `e2e` (applied to `ttfc` comparisons in `GeminiLivePanel` / `LatencyMonitor`).
 - Gemini tool declarations (function schema with enums, examples) live in `GEMINI_TOOL_DECLARATIONS` in [src/config/api.js](src/config/api.js) — update alongside `SCENARIO_PROMPTS` when changing tools.
 - Three-mode compatibility rule: never break Mock or WS Live when adding Gemini Live features; use `voiceMode` guards.
 - WS Live welcome message: backend auto-pushes after `setupComplete` (TODO: trigger mechanism TBD with backend team).

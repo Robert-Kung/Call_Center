@@ -19,15 +19,16 @@ export default function LatencyMonitor() {
     return 'bg-red-500';
   };
 
-  // Gemini 模式使用端到端延遲，REST 模式使用分段延遲
+  // Gemini 模式：TTFC（感知延遲）+ 串流時長；REST 模式：分段延遲
   const metrics = isGeminiMode
     ? [
-        { key: 'e2e', label: 'E2E', icon: Sparkles, value: latencyMetrics.e2e || latencyMetrics.total, max: 1000 }
+        { key: 'ttfc',   label: 'TTFC',   icon: Sparkles, value: latencyMetrics.ttfc ?? 0,          max: 600  },
+        { key: 'stream', label: '串流',   icon: Activity, value: latencyMetrics.streamDuration ?? 0, max: 1500 }
       ]
     : [
-        { key: 'asr', label: 'ASR', icon: Mic, value: latencyMetrics.asr, max: 500 },
-        { key: 'llm', label: 'LLM', icon: Brain, value: latencyMetrics.llm, max: 1200 },
-        { key: 'tts', label: 'TTS', icon: Volume2, value: latencyMetrics.tts, max: 300 }
+        { key: 'asr', label: 'ASR', icon: Mic,     value: latencyMetrics.asr, max: 500  },
+        { key: 'llm', label: 'LLM', icon: Brain,   value: latencyMetrics.llm, max: 1200 },
+        { key: 'tts', label: 'TTS', icon: Volume2, value: latencyMetrics.tts, max: 300  }
       ];
 
   return (
@@ -45,7 +46,7 @@ export default function LatencyMonitor() {
         <div>
           <h2 className="font-semibold text-white text-sm">延遲監控</h2>
           <p className="text-xs text-slate-400">
-            {isGeminiMode ? 'Gemini Live E2E' : 'Latency Monitor'}
+            {isGeminiMode ? 'Gemini Live TTFC' : 'Latency Monitor'}
           </p>
         </div>
         {/* 總延遲 */}
@@ -65,25 +66,29 @@ export default function LatencyMonitor() {
           </div>
         ) : (
           <div className="space-y-4">
-            {metrics.map(({ key, label, icon: Icon, value, max }) => (
-              <div key={key} className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Icon className="w-4 h-4 text-slate-400" />
-                    <span className="text-xs text-slate-400">{label}</span>
+            {metrics.map(({ key, label, icon: Icon, value, max }) => {
+              // TTFC 為 0 代表本輪無使用者語音（如歡迎語），顯示 N/A 不顯示進度條
+              const noData = value === 0;
+              return (
+                <div key={key} className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Icon className="w-4 h-4 text-slate-400" />
+                      <span className="text-xs text-slate-400">{label}</span>
+                    </div>
+                    <span className={`text-sm font-mono ${noData ? 'text-slate-500' : getLatencyColor(value)}`}>
+                      {noData ? '---' : `${value}ms`}
+                    </span>
                   </div>
-                  <span className={`text-sm font-mono ${getLatencyColor(value)}`}>
-                    {value > 0 ? `${value}ms` : '---'}
-                  </span>
+                  <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${noData ? '' : getLatencyBg(value)}`}
+                      style={{ width: noData ? '0%' : `${Math.min((value / max) * 100, 100)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${getLatencyBg(value)}`}
-                    style={{ width: `${Math.min((value / max) * 100, 100)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
 
             {/* 狀態指示 */}
             <div className="pt-2 border-t border-slate-700/50">

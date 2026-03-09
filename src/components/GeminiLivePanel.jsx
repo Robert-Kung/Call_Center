@@ -65,17 +65,22 @@ export function GeminiLivePanel() {
 
       {/* 統計資訊 */}
       <div className="grid grid-cols-3 gap-3">
-        {/* 端到端延遲 */}
+        {/* 感知延遲（TTFC） */}
         <div className="bg-slate-900/50 rounded-lg p-2.5">
           <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1">
             <Zap className="w-3 h-3" />
-            端到端延遲
+            感知延遲
           </div>
           <div className={`text-lg font-mono font-semibold ${
-            latencyMetrics.e2e ? getLatencyColor(latencyMetrics.e2e) : 'text-slate-500'
+            latencyMetrics.ttfc ? getLatencyColor(latencyMetrics.ttfc) : 'text-slate-500'
           }`}>
-            {latencyMetrics.e2e ? `${latencyMetrics.e2e}ms` : '--'}
+            {latencyMetrics.ttfc ? `${latencyMetrics.ttfc}ms` : '--'}
           </div>
+          {latencyMetrics.streamDuration > 0 && (
+            <div className="text-[10px] text-slate-500 mt-0.5">
+              串流 {latencyMetrics.streamDuration}ms
+            </div>
+          )}
         </div>
 
         {/* Token 輸入 */}

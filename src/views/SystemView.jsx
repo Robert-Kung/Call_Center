@@ -202,9 +202,9 @@ export default function SystemView() {
                         {latencyMetrics.tts}ms
                       </span>
                     )}
-                    {step.id === 'gemini' && latencyMetrics.total > 0 && (
-                      <span className={`text-xs font-mono mt-1 text-${getLatencyColor(latencyMetrics.total)}-400`}>
-                        {latencyMetrics.total}ms e2e
+                    {step.id === 'gemini' && (latencyMetrics.ttfc > 0 || latencyMetrics.streamDuration > 0) && (
+                      <span className={`text-xs font-mono mt-1 text-${getLatencyColor(latencyMetrics.e2e || latencyMetrics.total)}-400`}>
+                        {latencyMetrics.ttfc > 0 ? `${latencyMetrics.ttfc}ms TTFC` : `${latencyMetrics.streamDuration}ms`}
                       </span>
                     )}
                   </div>
@@ -427,18 +427,33 @@ export default function SystemView() {
                    geminiConnectionStatus === 'connecting' ? 'Connecting...' : 'Idle'}
                 </span>
               </div>
-              {/* E2E 延遲 */}
+              {/* 感知延遲 TTFC */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">E2E Latency</span>
-                  <span className={`font-mono text-${getLatencyColor(latencyMetrics.total)}-400`}>
-                    {latencyMetrics.total}ms
+                  <span className="text-slate-500">TTFC (感知延遲)</span>
+                  <span className={`font-mono text-${getLatencyColor(latencyMetrics.ttfc || 0)}-400`}>
+                    {latencyMetrics.ttfc > 0 ? `${latencyMetrics.ttfc}ms` : '--'}
                   </span>
                 </div>
                 <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className={`h-full bg-${getLatencyColor(latencyMetrics.total)}-500 rounded-full transition-all`}
-                    style={{ width: `${Math.min((latencyMetrics.total / 2000) * 100, 100)}%` }}
+                    className={`h-full bg-${getLatencyColor(latencyMetrics.ttfc || 0)}-500 rounded-full transition-all`}
+                    style={{ width: `${latencyMetrics.ttfc > 0 ? Math.min((latencyMetrics.ttfc / 800) * 100, 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+              {/* 串流時長 */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500">串流時長</span>
+                  <span className={`font-mono text-${getLatencyColor(latencyMetrics.streamDuration || 0)}-400`}>
+                    {latencyMetrics.streamDuration > 0 ? `${latencyMetrics.streamDuration}ms` : '--'}
+                  </span>
+                </div>
+                <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full bg-${getLatencyColor(latencyMetrics.streamDuration || 0)}-500 rounded-full transition-all`}
+                    style={{ width: `${latencyMetrics.streamDuration > 0 ? Math.min((latencyMetrics.streamDuration / 2000) * 100, 100) : 0}%` }}
                   />
                 </div>
               </div>

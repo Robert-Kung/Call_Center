@@ -34,6 +34,8 @@ export function CallProvider({ children }) {
   const [geminiTokenUsage, setGeminiTokenUsage] = useState({ input: 0, output: 0, total: 0 });
   const [geminiConnectionStatus, setGeminiConnectionStatus] = useState('disconnected');
   const [isStreaming, setIsStreaming] = useState(false);  // Gemini Live 即時串流中
+  const [streamingAiText, setStreamingAiText] = useState('');    // AI 串流逐字稿（即時顯示）
+  const [streamingUserText, setStreamingUserText] = useState(''); // 使用者語音轉錄（說話時即時顯示，turnComplete 後轉正式訊息）
 
   // 麥克風 MediaStream ref (用於 Gemini Live 串流)
   const mediaStreamRef = useRef(null);
@@ -426,6 +428,16 @@ export function CallProvider({ children }) {
         }
       };
 
+      // ---- 即時文字串流（outputTranscription 逐 chunk 顯示）----
+      geminiService.onTranscript = ({ type, text }) => {
+        if (type === 'output') {
+          setStreamingAiText(prev => prev + text);
+        } else if (type === 'input') {
+          // 使用者說話時即時更新轉錄，turnComplete 後由 displayedConversations 取代
+          setStreamingUserText(prev => prev + text);
+        }
+      };
+
       // ---- 即時音訊串流 (逐 chunk 播放，不等 turnComplete) ----
       geminiService.onAudioChunk = (chunkBase64) => {
         pendingAudioChunks++;
@@ -447,6 +459,10 @@ export function CallProvider({ children }) {
         console.log('[CallContext] Gemini 回應完成:');
         console.log('[CallContext]   👤 USER:', response.userText || '(無)');
         console.log('[CallContext]   🤖 AI:', response.aiText || '(無)');
+
+        // 清除串流文字（改由 displayedConversations 顯示完整訊息）
+        setStreamingAiText('');
+        setStreamingUserText('');
 
         // 加入使用者語音轉文字
         if (response.userText && response.userText.trim()) {
@@ -480,7 +496,11 @@ export function CallProvider({ children }) {
             llm: 0,
             tts: 0
           });
-          addLog(`端到端延遲: ${response.latency.e2e || response.latency.total}ms`, 'info');
+          const { ttfc, streamDuration, e2e } = response.latency;
+          const latencyLog = ttfc != null
+            ? `TTFC: ${ttfc}ms, 串流: ${streamDuration}ms`
+            : `端到端延遲: ${e2e}ms`;
+          addLog(latencyLog, 'info');
         }
 
         // 更新 Token 使用量
@@ -492,6 +512,9 @@ export function CallProvider({ children }) {
       geminiService.onInterrupted = () => {
         console.log('[CallContext] Gemini 被中斷（使用者開始說話）');
         audioPlayer.stopPlayback();
+        // 清除串流文字（被中斷，捨棄未完成的回應）
+        setStreamingAiText('');
+        setStreamingUserText('');
         // 重置串流計數，避免殘留值影響下一輪的 suppress 邏輯
         pendingAudioChunks = 0;
         turnComplete = false;
@@ -636,7 +659,8 @@ export function CallProvider({ children }) {
         addLog('播放歡迎語音 (PCM 24kHz)', 'info');
       }
 
-      // 加入 AI 歡迎語到對話
+      // 加入 AI 歡迎語到對話（同時清除 streamingAiText，歡迎語走 Promise 路徑不會自動清除）
+      setStreamingAiText('');
       if (response.ai_text) {
         setDisplayedConversations([{
           id: uid(),
@@ -725,11 +749,14 @@ export function CallProvider({ children }) {
       // 清除 Gemini callbacks
       const geminiService = voiceServiceRef.current.getGeminiLiveService();
       geminiService.onAudioChunk = null;
+      geminiService.onTranscript = null;
       geminiService.onResponseComplete = null;
       geminiService.onInterrupted = null;
       geminiService.onError = null;
       geminiService.onConnectionChange = null;
       geminiService.onToolCall = null;
+      setStreamingAiText('');
+      setStreamingUserText('');
       voiceServiceRef.current.endGeminiSession();
       setGeminiConnectionStatus('disconnected');
     } else if (voiceMode === 'rest-live') {
@@ -945,11 +972,14 @@ export function CallProvider({ children }) {
       if (voiceMode === 'gemini-live') {
         const geminiService = voiceServiceRef.current.getGeminiLiveService();
         geminiService.onAudioChunk = null;
+        geminiService.onTranscript = null;
         geminiService.onResponseComplete = null;
         geminiService.onInterrupted = null;
         geminiService.onError = null;
         geminiService.onConnectionChange = null;
         geminiService.onToolCall = null;
+        setStreamingAiText('');
+        setStreamingUserText('');
         voiceServiceRef.current.endGeminiSession();
         setGeminiConnectionStatus('disconnected');
       } else if (voiceMode === 'rest-live') {
@@ -1029,6 +1059,8 @@ export function CallProvider({ children }) {
     geminiTokenUsage,
     geminiConnectionStatus,
     isStreaming,
+    streamingAiText,
+    streamingUserText,
 
     // 播放狀態
     isPlaying: audioPlayer.isPlaying,

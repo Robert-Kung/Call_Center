@@ -10,13 +10,14 @@ Call_Center/
 │  │  ├─ index.css                   # 全域樣式
 │  │  ├─ components/                 # UI 組件
 │  │  │  ├─ PhoneSimulator.jsx       # 手機模擬器
-│  │  │  ├─ ConversationPanel.jsx    # 對話面板
-│  │  │  ├─ AnalysisPanel.jsx        # 意圖分析面板
-│  │  │  ├─ LatencyMonitor.jsx       # 延遲監控（支援 REST/Gemini 雙模式）
+│  │  │  ├─ ConversationPanel.jsx    # 對話面板（含 Gemini Live 串流即時氣泡）
+│  │  │  ├─ AnalysisPanel.jsx        # 意圖分析面板（Mock / Gemini Live）
+│  │  │  ├─ LatencyMonitor.jsx       # 延遲監控（Mock: ASR/LLM/TTS；Gemini: TTFC+串流）
 │  │  │  ├─ SystemLogPanel.jsx       # 系統日誌
-│  │  │  ├─ TicketPanel.jsx          # 工單顯示
-│  │  │  ├─ ModeSwitch.jsx           # 三模式切換器 (Mock/REST/Gemini)
-│  │  │  └─ GeminiLivePanel.jsx      # Gemini Live 監控面板
+│  │  │  ├─ TicketPanel.jsx          # 工單顯示（Mock / Gemini Live）
+│  │  │  ├─ ModeSwitch.jsx           # 三模式切換器 (Mock/WS Live/Gemini Live)
+│  │  │  ├─ GeminiLivePanel.jsx      # Gemini Live 狀態面板（TTFC + 串流時長 + token）
+│  │  │  └─ RestWsPanel.jsx          # WS Live 狀態面板（連線狀態 + ASR/LLM/TTS/合計延遲）
 │  │  ├─ context/
 │  │  │  └─ CallContext.jsx          # 全域狀態管理（三模式分流）
 │  │  ├─ services/
@@ -35,7 +36,7 @@ Call_Center/
 │  │  ├─ config/
 │  │  │  └─ api.js                   # API + Gemini 配置
 │  │  ├─ views/
-│  │  │  ├─ DemoView.jsx             # 展示視角
+│  │  │  ├─ DemoView.jsx             # 展示視角（面板按 voiceMode 條件顯示）
 │  │  │  ├─ ConsumerView.jsx         # 消費者視角（語音串流）
 │  │  │  ├─ AgentView.jsx            # 客服視角
 │  │  │  ├─ SystemView.jsx           # 系統視角（Pipeline 視覺化）
