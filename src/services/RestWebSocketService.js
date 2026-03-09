@@ -42,7 +42,7 @@ class RestWebSocketService {
 
     // 串流相關
     this._audioContext = null;
-    this._scriptProcessor = null;
+    this._workletNode = null;
     this._mediaStreamSource = null;
     this._isStreaming = false;
     this._actualSampleRate = null;
@@ -174,68 +174,40 @@ class RestWebSocketService {
       }));
     }
 
-    const bufferSize = 4096;
-    this._scriptProcessor = this._audioContext.createScriptProcessor(bufferSize, 1, 1);
-
-    this._scriptProcessor.onaudioprocess = (e) => {
-      if (!this._isStreaming) return;
-      if (this._suppressInput) return;
-
-      const float32 = e.inputBuffer.getChannelData(0);
-
-      // 音量診斷
-      let maxAmp = 0;
-      for (let i = 0; i < float32.length; i++) {
-        const abs = Math.abs(float32[i]);
-        if (abs > maxAmp) maxAmp = abs;
+    // 載入 AudioWorklet 模組（獨立執行緒，不阻塞主執行緒）
+    // resampleTo: 16000 — 後端 VAD 固定以 16kHz 解析 PCM
+    // targetChunkMs: 100ms — 每次送出約 1600 samples @ 16kHz
+    const workletUrl = new URL('../worklets/audioProcessor.worklet.js', import.meta.url);
+    await this._audioContext.audioWorklet.addModule(workletUrl);
+    this._workletNode = new AudioWorkletNode(this._audioContext, 'audio-processor', {
+      processorOptions: {
+        targetChunkMs: 100,
+        resampleTo: 16000
       }
+    });
+
+    // 接收來自 Worklet 的 int16 音訊 chunk（已完成降採樣與 int16 轉換）
+    this._workletNode.port.onmessage = (event) => {
+      if (!this._isStreaming || this._suppressInput) return;
+
+      const { int16, outputRate, maxAmp } = event.data;
+
+      // 振幅診斷（worklet 端計算後傳回）
       if (maxAmp > this._maxAmpEver) this._maxAmpEver = maxAmp;
       if (maxAmp < 0.001) this._silentChunks++;
 
-      // 降採樣到 16kHz（後端 VAD 固定以 16kHz 計算音訊長度）
-      // 使用線性插值，同步執行不阻塞 audio thread
-      const TARGET_RATE = 16000;
-      let pcmSource = float32;
-      if (this._actualSampleRate !== TARGET_RATE) {
-        const ratio = this._actualSampleRate / TARGET_RATE;
-        const outLen = Math.round(float32.length / ratio);
-        pcmSource = new Float32Array(outLen);
-        for (let i = 0; i < outLen; i++) {
-          const pos = i * ratio;
-          const idx = Math.floor(pos);
-          const frac = pos - idx;
-          const a = float32[idx] ?? 0;
-          const b = float32[Math.min(idx + 1, float32.length - 1)] ?? 0;
-          pcmSource[i] = a + frac * (b - a);
-        }
-      }
-
-      // float32 → int16 PCM
-      const int16 = new Int16Array(pcmSource.length);
-      for (let i = 0; i < pcmSource.length; i++) {
-        const s = Math.max(-1, Math.min(1, pcmSource[i]));
-        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-
-      // int16 → base64
-      const uint8 = new Uint8Array(int16.buffer);
-      let binary = '';
-      for (let i = 0; i < uint8.length; i++) {
-        binary += String.fromCharCode(uint8[i]);
-      }
-      const b64 = btoa(binary);
-
+      // int16 ArrayBuffer → base64
+      const b64 = this._int16BufferToBase64(int16);
       this._sendRealtimeAudio(b64);
       this._audioChunksSent++;
-      this._audioBytesSent += uint8.length;
+      this._audioBytesSent += int16.byteLength;
 
       // 首個 chunk 詳細診斷
       if (this._audioChunksSent === 1) {
-        console.log('[RestWS] 🎤 首個音訊 chunk:', {
-          srcSamples: float32.length,
-          dstSamples: pcmSource.length,
+        console.log('[RestWS] 🎤 首個音訊 chunk (AudioWorklet):', {
+          int16Samples: int16.byteLength / 2,
           srcRate: this._actualSampleRate,
-          dstRate: TARGET_RATE,
+          dstRate: outputRate,
           maxAmp: maxAmp.toFixed(6),
           b64Length: b64.length,
         });
@@ -248,11 +220,11 @@ class RestWebSocketService {
       }
     };
 
-    // 連接 audio pipeline
-    this._mediaStreamSource.connect(this._scriptProcessor);
-    this._scriptProcessor.connect(this._audioContext.destination);
+    // 連接 audio pipeline（WorkletNode 不需接到 destination）
+    this._mediaStreamSource.connect(this._workletNode);
 
-    console.log('[RestWS] ✅ 音訊串流已啟動 (sampleRate=%d, bufferSize=%d)', this._actualSampleRate, bufferSize);
+    console.log('[RestWS] ✅ 音訊串流已啟動 (AudioWorklet, srcRate=%d, dstRate=16000, chunk=100ms)',
+      this._actualSampleRate);
   }
 
   /**
@@ -287,9 +259,10 @@ class RestWebSocketService {
       this._audioChunksSent, this._audioBytesSent, this._maxAmpEver, this._silentChunks);
     this._isStreaming = false;
 
-    if (this._scriptProcessor) {
-      this._scriptProcessor.disconnect();
-      this._scriptProcessor = null;
+    if (this._workletNode) {
+      this._workletNode.port.close();
+      this._workletNode.disconnect();
+      this._workletNode = null;
     }
     if (this._mediaStreamSource) {
       this._mediaStreamSource.disconnect();
@@ -688,6 +661,20 @@ class RestWebSocketService {
     this.outputTranscriptBuffer = '';
     this.inputTranscriptBuffer = '';
     this._responseStartTime = null;
+  }
+
+  /**
+   * int16 ArrayBuffer → base64 字串
+   * 分塊呼叫 apply 避免大 buffer 造成 call stack overflow
+   */
+  _int16BufferToBase64(buffer) {
+    const uint8 = new Uint8Array(buffer);
+    const CHUNK = 0x8000;
+    let binary = '';
+    for (let i = 0; i < uint8.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, uint8.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
   }
 
   /**

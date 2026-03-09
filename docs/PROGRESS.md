@@ -16,6 +16,7 @@
 | 3 | Live 模式意圖分析與單據 | ✅ 已完成 | 3-5 天 | 1 天 |
 | 4 | 整合測試與優化 | ✅ 已完成 | 1 天 | 0.5 天 |
 | 5 | REST Live 改用 WebSocket 流線 | ✅ 已完成 | 2 天 | 1 天 |
+| 6 | AudioWorklet 音訊採集升級 | ✅ 已完成 | - | - |
 
 ---
 
@@ -121,6 +122,27 @@
 
 ---
 
+---
+
+### Phase 6: AudioWorklet 音訊採集升級
+**狀態**: ✅ 2026-02-24 完成
+
+| # | 任務 | 狀態 | 完成日期 | 備註 |
+|---|------|------|----------|------|
+| 6-1 | 建立 `src/worklets/audioProcessor.worklet.js` | ✅ | 2026-02-24 | 獨立執行緒處理器；支援可選降採樣（線性插值）；固定 128 samples/call 累積至 targetChunkMs |
+| 6-2 | RestWebSocketService 改用 AudioWorkletNode | ✅ | 2026-02-24 | resampleTo=16000, chunk=100ms；移除 ScriptProcessor 與主執行緒降採樣邏輯 |
+| 6-3 | GeminiLiveService 改用 AudioWorkletNode | ✅ | 2026-02-24 | resampleTo=null（Gemini server 端重採），chunk=100ms；移除 ScriptProcessor |
+| 6-4 | 更新 STRUCTURE.md | ✅ | 2026-02-24 | 新增 worklets/ 目錄說明 |
+
+**技術設計**:
+- Worklet 執行緒：累積 128-sample 區塊至目標時長後，在 worklet 端完成降採樣 + int16 轉換
+- 零複製傳輸：ArrayBuffer transfer（`postMessage` transferList）避免複製開銷
+- 振幅診斷：在 worklet 端計算 maxAmp，隨資料一起傳回，主執行緒不需額外迴圈
+- RestWS：`resampleTo=16000`（後端 VAD 需要 16kHz），chunk ≈ 100ms → 1600 samples @ 16kHz
+- GeminiLive：`resampleTo=null`（Gemini 接受任意取樣率），chunk ≈ 100ms → 4800 samples @ 48kHz
+
+---
+
 ## 變更日誌
 
 | 日期 | 事項 |
@@ -133,4 +155,5 @@
 | 2026-03-02 | ✅ Phase 4 完成：狀態保持防竟修復、header 響應式、文件同步更新 |
 | 2026-03-03 | 開始 Phase 5：REST WS 重構規劃完成；執行 Phase 1-7（內部分院）完成；env 載入問題修復；HTTPS mixed content 修復 |
 | 2026-03-04 | ✅ Phase 5 完成：RestWebSocketService 改用 Gemini Live wire protocol，build 驗證通過 |
+| 2026-02-24 | ✅ Phase 6 完成：AudioWorklet 升級（RestWS + GeminiLive），新增 audioProcessor.worklet.js，移除 ScriptProcessor |
 | 2026-03-04 | 移除 ConsumerView/SystemView 殘留 PTT 按鈕（`startRecording`/`stopRecordingAndSend` 已無效）；改為 WS Live 串流狀態指示器（青色，對齊 Gemini Live 紫色） |

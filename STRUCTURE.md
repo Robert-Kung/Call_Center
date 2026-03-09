@@ -23,7 +23,10 @@ Call_Center/
 │  │  │  ├─ VoiceService.js          # 語音服務封裝（REST + Gemini）
 │  │  │  ├─ ApiClient.js             # HTTP 客戶端（REST Live 用）
 │  │  │  ├─ GeminiLiveService.js     # Gemini Live WebSocket 服務
+│  │  │  ├─ RestWebSocketService.js  # REST WS 代理服務（Gemini Live 協定）
 │  │  │  └─ SessionLogger.js         # 通話 Session 記錄器（本地 JSON）
+│  │  ├─ worklets/
+│  │  │  └─ audioProcessor.worklet.js  # AudioWorklet 處理器（獨立執行緒採集/降採樣）
 │  │  ├─ hooks/
 │  │  │  ├─ useAudioRecorder.js      # 錄音 Hook（16kHz mono）
 │  │  │  └─ useAudioPlayer.js        # 播放 Hook（佇列式 base64 播放）

@@ -32,7 +32,7 @@ class GeminiLiveService {
 
     // 串流相關
     this._audioContext = null;
-    this._scriptProcessor = null;
+    this._workletNode = null;
     this._mediaStreamSource = null;
     this._isStreaming = false;
 
@@ -139,7 +139,7 @@ class GeminiLiveService {
 
     console.log('[GeminiLive] AudioContext sampleRate: %d (Gemini 會自動重採樣)', this._actualSampleRate);
 
-    // 連接麥克風到 ScriptProcessor
+    // 連接麥克風到 AudioWorkletNode
     this._mediaStreamSource = this._audioContext.createMediaStreamSource(mediaStream);
 
     // 確認 MediaStream 的 track 設定
@@ -154,60 +154,49 @@ class GeminiLiveService {
       }));
     }
 
-    // ScriptProcessorNode
-    const bufferSize = 4096;
-    this._scriptProcessor = this._audioContext.createScriptProcessor(bufferSize, 1, 1);
-
     this._audioChunksSent = 0;
     this._audioBytesSent = 0;
     this._maxAmpEver = 0;
     this._silentChunks = 0;
 
-    this._scriptProcessor.onaudioprocess = (e) => {
-      if (!this._isStreaming) return;
-
-      // AI 播放中 → 不送出麥克風音訊 (防止回音)
-      if (this._suppressInput) return;
-
-      const float32 = e.inputBuffer.getChannelData(0);
-
-      // 檢查音量
-      let maxAmp = 0;
-      for (let i = 0; i < float32.length; i++) {
-        const abs = Math.abs(float32[i]);
-        if (abs > maxAmp) maxAmp = abs;
+    // 載入 AudioWorklet 模組（獨立執行緒，不阻塞主執行緒）
+    // resampleTo: null — Gemini server 支援任意取樣率自動重採樣，不在客戶端降採
+    // targetChunkMs: 100ms — 每次送出約 4800 samples @ 48kHz
+    const workletUrl = new URL('../worklets/audioProcessor.worklet.js', import.meta.url);
+    await this._audioContext.audioWorklet.addModule(workletUrl);
+    this._workletNode = new AudioWorkletNode(this._audioContext, 'audio-processor', {
+      processorOptions: {
+        targetChunkMs: 100,
+        resampleTo: null  // 不降採，送原始取樣率給 Gemini server
       }
+    });
+
+    // 接收來自 Worklet 的 int16 音訊 chunk
+    this._workletNode.port.onmessage = (event) => {
+      if (!this._isStreaming || this._suppressInput) return;
+
+      const { int16, outputRate, maxAmp } = event.data;
+
+      // 振幅診斷（worklet 端計算後傳回）
       if (maxAmp > this._maxAmpEver) this._maxAmpEver = maxAmp;
       if (maxAmp < 0.001) this._silentChunks++;
 
-      // 直接轉為 16-bit PCM（不重採樣，MIME type 帶實際取樣率）
-      const int16 = new Int16Array(float32.length);
-      for (let i = 0; i < float32.length; i++) {
-        const s = Math.max(-1, Math.min(1, float32[i]));
-        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-
-      // 轉為 base64 並送出
-      const uint8 = new Uint8Array(int16.buffer);
-      let binary = '';
-      for (let i = 0; i < uint8.length; i++) {
-        binary += String.fromCharCode(uint8[i]);
-      }
-      const b64 = btoa(binary);
+      // int16 ArrayBuffer → base64
+      const b64 = this._int16BufferToBase64(int16);
       this._sendRealtimeAudio(b64);
 
       this._audioChunksSent++;
-      this._audioBytesSent += uint8.length;
+      this._audioBytesSent += int16.byteLength;
 
       // 第一個 chunk — 詳細診斷
       if (this._audioChunksSent === 1) {
-        console.log('[GeminiLive] 🎤 首個音訊 chunk:', {
-          samples: float32.length,
+        console.log('[GeminiLive] 🎤 首個音訊 chunk (AudioWorklet):', {
+          int16Samples: int16.byteLength / 2,
           maxAmp: maxAmp.toFixed(6),
           b64Length: b64.length,
-          pcmBytes: uint8.length,
-          sampleRate: this._actualSampleRate,
-          mimeType: `audio/pcm;rate=${this._actualSampleRate}`
+          pcmBytes: int16.byteLength,
+          sampleRate: outputRate,
+          mimeType: `audio/pcm;rate=${outputRate}`
         });
       }
 
@@ -218,10 +207,10 @@ class GeminiLiveService {
       }
     };
 
-    this._mediaStreamSource.connect(this._scriptProcessor);
-    this._scriptProcessor.connect(this._audioContext.destination);
+    // 連接 audio pipeline（WorkletNode 不需接到 destination）
+    this._mediaStreamSource.connect(this._workletNode);
 
-    console.log('[GeminiLive] 串流已啟動 (sampleRate=%d, bufferSize=%d)', this._actualSampleRate, bufferSize);
+    console.log('[GeminiLive] 串流已啟動 (AudioWorklet, sampleRate=%d, chunk=100ms)', this._actualSampleRate);
 
     // 定期記錄音訊統計到 session log
     this._audioStatsInterval = setInterval(() => {
@@ -259,9 +248,10 @@ class GeminiLiveService {
       event: 'stop'
     });
 
-    if (this._scriptProcessor) {
-      this._scriptProcessor.disconnect();
-      this._scriptProcessor = null;
+    if (this._workletNode) {
+      this._workletNode.port.close();
+      this._workletNode.disconnect();
+      this._workletNode = null;
     }
     if (this._mediaStreamSource) {
       this._mediaStreamSource.disconnect();
@@ -691,6 +681,20 @@ class GeminiLiveService {
     this.outputTranscriptBuffer = '';
     this.inputTranscriptBuffer = '';
     this._responseStartTime = null;
+  }
+
+  /**
+   * int16 ArrayBuffer → base64 字串
+   * 分塊呼叫 apply 避免大 buffer 造成 call stack overflow
+   */
+  _int16BufferToBase64(buffer) {
+    const uint8 = new Uint8Array(buffer);
+    const CHUNK = 0x8000;
+    let binary = '';
+    for (let i = 0; i < uint8.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, uint8.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
   }
 
   _extractTokenUsage(metadata) {
