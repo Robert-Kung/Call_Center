@@ -5,7 +5,8 @@
       "Bash(docker compose:*)",
       "Bash(docker logs ai-voice-assistant-demo)",
       "Bash(test:*)",
-      "Bash(docker logs:*)"
+      "Bash(docker logs:*)",
+      "WebFetch(domain:ai.google.dev)"
     ],
     "additionalDirectories": [
       "/home/user/Call_Center /src/views"

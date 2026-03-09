@@ -11,11 +11,20 @@ function sessionLogPlugin() {
   const dataDir = path.resolve(process.cwd(), 'data');
 
   /** 從 session 物件產生摘要列資料，供 /api/sessions 回傳 */
+  /** latency 欄位可能是 number (Gemini) 或物件 { asr, llm, tts, total, e2e } (WS Live)，統一取 ms 值 */
+  function resolveLatencyMs(latency) {
+    if (latency == null) return null;
+    if (typeof latency === 'number') return latency;
+    // WS Live: 優先取 e2e（端到端），fallback 到 total
+    return latency.e2e ?? latency.total ?? null;
+  }
+
   function buildSessionSummary(session, filename) {
     const events = session.events || [];
     const latencies = events
-      .filter(e => e.type === 'turn_complete' && typeof e.latency === 'number')
-      .map(e => e.latency);
+      .filter(e => e.type === 'turn_complete' && e.latency != null)
+      .map(e => resolveLatencyMs(e.latency))
+      .filter(v => v != null);
     const avgLatency = latencies.length > 0
       ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
       : null;

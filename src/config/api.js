@@ -360,6 +360,9 @@ export const GEMINI_TOOL_DECLARATIONS = [
   {
     name: 'analyze_intent',
     description: '分析客戶發話的意圖、情緒和關鍵實體。僅在客戶說完話後呼叫，不分析 AI 自身的問候或回應。',
+    // SILENT：Gemini 收到 toolResponse 後靜默保留分析結果，不產生新語音回應
+    // 避免 toolResponse ack → 觸發第二次 turnComplete → 雙重語音播放
+    behavior: { scheduling: 'SILENT' },
     parameters: {
       type: 'OBJECT',
       properties: {

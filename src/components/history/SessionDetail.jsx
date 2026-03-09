@@ -99,6 +99,12 @@ function ChatBubble({ turn, idx }) {
                   {turn.latency.toLocaleString()}ms
                 </span>
               )}
+              {/* WS Live：顯示 ASR / LLM / TTS 細項 */}
+              {turn.latencyDetail && (
+                <span className="text-xs text-slate-600 font-mono">
+                  ASR {turn.latencyDetail.asr ?? '—'} · LLM {turn.latencyDetail.llm ?? '—'} · TTS {turn.latencyDetail.tts ?? '—'}
+                </span>
+              )}
               {turn.tokenUsage?.total != null && (
                 <span className="text-xs text-slate-600">{turn.tokenUsage.total} tokens</span>
               )}
@@ -197,13 +203,29 @@ export default function SessionDetail({ summary, session, onBack }) {
   const ticketEvents = events.filter(e => e.type === 'function_call' && e.name === 'create_ticket');
   const welcomeEvent = events.find(e => e.type === 'welcome');
 
+  // latency 欄位可能是 number (Gemini) 或物件 { asr, llm, tts, total, e2e } (WS Live)，統一取 ms 值
+  function resolveLatency(latency) {
+    if (latency == null) return null;
+    if (typeof latency === 'number') return latency;
+    return latency.e2e ?? latency.total ?? null;
+  }
+
   // 對話：用 summary（已是逐輪整理好的）或 turn_complete events
-  const chatSource = session?.summary?.length > 0 ? session.summary : turns.map(e => ({
-    userText: e.userText, aiText: e.aiText, latency: e.latency, tokenUsage: e.tokenUsage,
-  }));
+  const chatSource = session?.summary?.length > 0
+    ? session.summary.map(t => ({
+        ...t,
+        latency: resolveLatency(t.latency),
+        latencyDetail: typeof t.latency === 'object' && t.latency != null ? t.latency : null,
+      }))
+    : turns.map(e => ({
+        userText: e.userText, aiText: e.aiText,
+        latency: resolveLatency(e.latency),
+        tokenUsage: e.tokenUsage,
+        latencyDetail: typeof e.latency === 'object' && e.latency != null ? e.latency : null,
+      }));
 
   // 延遲統計
-  const latencies = turns.map(e => e.latency).filter(v => v != null);
+  const latencies = turns.map(e => resolveLatency(e.latency)).filter(v => v != null);
   const maxLatency = Math.max(...latencies, 1);
   const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null;
   const minLatency = latencies.length > 0 ? Math.min(...latencies) : null;
@@ -267,16 +289,17 @@ export default function SessionDetail({ summary, session, onBack }) {
             </div>
             {/* 逐輪延遲 bars */}
             <div className="space-y-2.5">
-              {turns.map((turn, i) => (
-                turn.latency != null && (
+              {turns.map((turn, i) => {
+                const ms = resolveLatency(turn.latency);
+                return ms != null && (
                   <LatencyBar
                     key={i}
-                    value={turn.latency}
+                    value={ms}
                     max={maxLatency}
                     label={turn.userText ? `第 ${i + 1} 輪：${turn.userText.slice(0, 30)}${turn.userText.length > 30 ? '…' : ''}` : `第 ${i + 1} 輪`}
                   />
-                )
-              ))}
+                );
+              })}
             </div>
             {totalTokens > 0 && (
               <p className="text-xs text-slate-500 mt-3 text-right">

@@ -52,7 +52,9 @@ class GeminiLiveService {
     this._messageHandlers = new Map();
 
     // 回應計時
-    this._responseStartTime = null;
+    this._responseStartTime = null;    // 使用者說話結束時間（VAD 偵測末次 inputTranscription）
+    this._userSpeechEndTime = null;    // TTFC = 使用者說完 → 首個 AI chunk 的時間差（毫秒）
+    this._ttfc = null;
 
     // 音訊串流統計
     this._audioChunksSent = 0;
@@ -403,8 +405,8 @@ class GeminiLiveService {
         },
         // Function Calling — tools 必須放在 setup 頂層（與 generationConfig 同級）
         // 官方格式: tools: [{ functionDeclarations: [...] }]
-        // 注意：functionDeclarations 只接受 name/description/parameters，無自訂 behavior 欄位
-        // 非阻塞的 analyze_intent 行為改由 _handleFunctionCall (約 627–636 行) 以最小回覆 ACK 處理，不再透過 behavior 設定。
+        // analyze_intent 設有 behavior.scheduling='SILENT'，toolResponse 後 Gemini 靜默不產生新語音
+        // create_ticket 使用預設行為，toolResponse 後 Gemini 口頭確認單據建立
         tools: [{
           functionDeclarations: GEMINI_TOOL_DECLARATIONS
         }],
@@ -482,6 +484,11 @@ class GeminiLiveService {
         if (content.modelTurn?.parts) {
           if (!this._responseStartTime) {
             this._responseStartTime = performance.now();
+            // TTFC：使用者說完（末次 inputTranscription）→ 首個 AI chunk
+            if (this._userSpeechEndTime) {
+              this._ttfc = Math.round(this._responseStartTime - this._userSpeechEndTime);
+              console.log('[GeminiLive] ⏱ TTFC (說完→首chunk):', this._ttfc + 'ms');
+            }
           }
 
           for (const part of content.modelTurn.parts) {
@@ -515,6 +522,8 @@ class GeminiLiveService {
         // 使用者輸入轉錄
         if (content.inputTranscription?.text) {
           this.inputTranscriptBuffer += content.inputTranscription.text;
+          // 持續更新說話結束時間（VAD 偵測最後一段語音的轉錄時間點）
+          this._userSpeechEndTime = performance.now();
           console.log('[GeminiLive] 🎤 使用者轉錄:', content.inputTranscription.text);
           sessionLogger.log('input_transcript', { text: content.inputTranscription.text });
           if (this.onTranscript) {
@@ -524,15 +533,22 @@ class GeminiLiveService {
 
         // 回合結束
         if (content.turnComplete) {
-          const latency = this._responseStartTime
+          const streamDuration = this._responseStartTime
             ? Math.round(performance.now() - this._responseStartTime)
             : 0;
+          // e2e = TTFC（使用者感知延遲），若無法計算則退用 streamDuration
+          const e2e = this._ttfc ?? streamDuration;
 
           const response = {
             audio: this.audioBuffer.join(''),
             aiText: this.outputTranscriptBuffer || this.textBuffer,
             userText: this.inputTranscriptBuffer,
-            latency: { total: latency, e2e: latency },
+            latency: {
+              ttfc: this._ttfc,           // 使用者說完 → 首個 AI chunk
+              streamDuration,             // 首個 AI chunk → turnComplete
+              total: e2e + streamDuration,
+              e2e                         // 對外顯示的主要延遲指標
+            },
             tokenUsage: this._extractTokenUsage(message.usageMetadata)
           };
 
@@ -619,11 +635,8 @@ class GeminiLiveService {
 
     sessionLogger.log('function_call', { name, id, args });
 
-    // === analyze_intent：更新 UI，送出最小 ack 給 Gemini ===
-    // functionDeclarations 無 NON_BLOCKING 欄位，Gemini 實際上會等待 toolResponse。
-    // 不回應 → Gemini 等待超時 → 重新生成 → 第二次歡迎語（雙重播放的根因）。
-    // 正確做法：立即送 { status: 'ok' }，滿足 Gemini 期待，
-    // 不含分析內容（Gemini 沒有可「反應」的資訊，就不會主動繼續說話）。
+    // === analyze_intent：更新 UI，送出 ack 給 Gemini ===
+    // behavior.scheduling='SILENT'：Gemini 收到 toolResponse 後靜默，不產生新語音回應
     if (name === 'analyze_intent') {
       if (this.onToolCall) {
         try { this.onToolCall({ name, args, id }); } catch (e) {
@@ -681,6 +694,8 @@ class GeminiLiveService {
     this.outputTranscriptBuffer = '';
     this.inputTranscriptBuffer = '';
     this._responseStartTime = null;
+    this._userSpeechEndTime = null;
+    this._ttfc = null;
   }
 
   /**
