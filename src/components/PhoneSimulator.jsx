@@ -1,12 +1,13 @@
 import React from 'react';
-import { Phone, PhoneOff, Mic, MicOff, ChevronLeft, Loader2, Building2, UtensilsCrossed, Hotel, Sparkles, Radio, Wifi } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, ChevronLeft, Loader2, Building2, UtensilsCrossed, Stethoscope, Truck, Sparkles, Radio, Wifi } from 'lucide-react';
 import { useCall } from '../context/CallContext';
 
 // Icon 映射
 const iconMap = {
   Building2,
   UtensilsCrossed,
-  Hotel
+  Stethoscope,
+  Truck
 };
 
 export default function PhoneSimulator({ compact = false }) {

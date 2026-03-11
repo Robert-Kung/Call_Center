@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import {
   Headphones, Phone, PhoneOff, Mic, MicOff, User, Bot, Brain, FileText,
   AlertTriangle, CheckCircle, XCircle, Info, Activity, Clock, ArrowRight,
-  Building2, UtensilsCrossed, Hotel, Volume2, Pause, Play, Settings, MessageSquare,
+  Building2, UtensilsCrossed, Stethoscope, Truck, Volume2, Pause, Play, Settings, MessageSquare,
   Radio, Wifi, Sparkles, AlertCircle, Loader2
 } from 'lucide-react';
 import { useCall } from '../context/CallContext';
@@ -12,7 +12,8 @@ import SystemLogPanel from '../components/SystemLogPanel';
 const iconMap = {
   Building2,
   UtensilsCrossed,
-  Hotel
+  Stethoscope,
+  Truck
 };
 
 export default function AgentView() {

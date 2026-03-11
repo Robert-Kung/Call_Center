@@ -1,12 +1,13 @@
 import React, { useRef, useEffect } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, ChevronLeft, Loader2, Building2, UtensilsCrossed, Hotel, Volume2, Radio, Wifi, Sparkles, AlertCircle } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, ChevronLeft, Loader2, Building2, UtensilsCrossed, Stethoscope, Truck, Volume2, Radio, Wifi, Sparkles, AlertCircle } from 'lucide-react';
 import { useCall } from '../context/CallContext';
 
 // Icon 映射
 const iconMap = {
   Building2,
   UtensilsCrossed,
-  Hotel
+  Stethoscope,
+  Truck
 };
 
 export default function ConsumerView() {

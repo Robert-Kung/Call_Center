@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useMemo } from 'react';
 import {
   Settings, Mic, Brain, Volume2, ArrowRight, Phone, PhoneOff,
   Activity, Clock, Database, Server, Cpu, MemoryStick, Zap,
-  Building2, UtensilsCrossed, Hotel, CheckCircle, AlertTriangle,
+  Building2, UtensilsCrossed, Stethoscope, Truck, CheckCircle, AlertTriangle,
   Sparkles, Wifi, Radio
 } from 'lucide-react';
 import { useCall } from '../context/CallContext';
@@ -11,7 +11,8 @@ import { useCall } from '../context/CallContext';
 const iconMap = {
   Building2,
   UtensilsCrossed,
-  Hotel
+  Stethoscope,
+  Truck
 };
 
 // 流程步驟 — REST / Mock

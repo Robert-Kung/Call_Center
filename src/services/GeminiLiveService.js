@@ -133,15 +133,18 @@ class GeminiLiveService {
     console.log('[GeminiLive] 開始即時串流...');
     this._isStreaming = true;
 
-    // 建立 AudioContext — 使用瀏覽器預設取樣率
-    // 官方文件: "the Live API will resample if needed so any sample rate can be sent"
-    // 不做客戶端重採樣，交給 Gemini 伺服器處理
-    this._audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    // 官方 WebSocket 版做法: AudioContext 直接建在 16kHz
+    // 瀏覽器硬體自動將麥克風 48kHz 降採樣至 16kHz，品質優於 JS 手寫降採樣
+    // ref: https://github.com/google-gemini/gemini-live-api-examples/.../mediaUtils.js
+    const TARGET_SAMPLE_RATE = 16000;
+    this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: TARGET_SAMPLE_RATE
+    });
     this._actualSampleRate = this._audioContext.sampleRate;
 
-    console.log('[GeminiLive] AudioContext sampleRate: %d (Gemini 會自動重採樣)', this._actualSampleRate);
+    console.log('[GeminiLive] AudioContext sampleRate: %d (目標 16kHz)', this._actualSampleRate);
 
-    // 連接麥克風到 AudioWorkletNode
+    // 連接麥克風
     this._mediaStreamSource = this._audioContext.createMediaStreamSource(mediaStream);
 
     // 確認 MediaStream 的 track 設定
@@ -161,58 +164,67 @@ class GeminiLiveService {
     this._maxAmpEver = 0;
     this._silentChunks = 0;
 
-    // 載入 AudioWorklet 模組（獨立執行緒，不阻塞主執行緒）
-    // resampleTo: null — Gemini server 支援任意取樣率自動重採樣，不在客戶端降採
-    // targetChunkMs: 100ms — 每次送出約 4800 samples @ 48kHz
-    const workletUrl = new URL('../worklets/audioProcessor.worklet.js', import.meta.url);
+    // 載入 capture worklet（對齊官方做法：worklet 只採集 float32，不做轉換）
+    // 官方 bufferSize=4096 → 256ms @16kHz（大 chunk 讓 Gemini VAD 更穩定）
+    const workletUrl = new URL('../worklets/audioCapture.worklet.js', import.meta.url);
     await this._audioContext.audioWorklet.addModule(workletUrl);
-    this._workletNode = new AudioWorkletNode(this._audioContext, 'audio-processor', {
+    this._workletNode = new AudioWorkletNode(this._audioContext, 'audio-capture-processor', {
       processorOptions: {
-        targetChunkMs: 100,
-        resampleTo: null  // 不降採，送原始取樣率給 Gemini server
+        bufferSize: 4096   // 4096 samples @16kHz = 256ms（與官方一致）
       }
     });
 
-    // 接收來自 Worklet 的 int16 音訊 chunk
+    // 接收 worklet 的 float32 PCM（已是 16kHz，由 AudioContext 硬體降採樣）
+    // 主執行緒只做 float32→int16 轉換 + base64 編碼
     this._workletNode.port.onmessage = (event) => {
       if (!this._isStreaming || this._suppressInput) return;
+      if (event.data.type !== 'audio') return;
 
-      const { int16, outputRate, maxAmp } = event.data;
+      const float32 = event.data.data;  // Float32Array @16kHz
 
-      // 振幅診斷（worklet 端計算後傳回）
+      // 振幅診斷
+      let maxAmp = 0;
+      for (let i = 0; i < float32.length; i++) {
+        const abs = Math.abs(float32[i]);
+        if (abs > maxAmp) maxAmp = abs;
+      }
       if (maxAmp > this._maxAmpEver) this._maxAmpEver = maxAmp;
       if (maxAmp < 0.001) this._silentChunks++;
 
+      // float32 → int16 PCM（官方做法）
+      const pcm16 = this._convertFloat32ToInt16(float32);
+
       // int16 ArrayBuffer → base64
-      const b64 = this._int16BufferToBase64(int16);
+      const b64 = this._int16BufferToBase64(pcm16);
       this._sendRealtimeAudio(b64);
 
       this._audioChunksSent++;
-      this._audioBytesSent += int16.byteLength;
+      this._audioBytesSent += pcm16.byteLength;
 
       // 第一個 chunk — 詳細診斷
       if (this._audioChunksSent === 1) {
-        console.log('[GeminiLive] 🎤 首個音訊 chunk (AudioWorklet):', {
-          int16Samples: int16.byteLength / 2,
+        console.log('[GeminiLive] 🎤 首個音訊 chunk:', {
+          samples: float32.length,
           maxAmp: maxAmp.toFixed(6),
           b64Length: b64.length,
-          pcmBytes: int16.byteLength,
-          sampleRate: outputRate,
-          mimeType: `audio/pcm;rate=${outputRate}`
+          pcmBytes: pcm16.byteLength,
+          sampleRate: TARGET_SAMPLE_RATE,
+          chunkMs: Math.round(float32.length / TARGET_SAMPLE_RATE * 1000),
+          mimeType: 'audio/pcm;rate=16000'
         });
       }
 
-      // 每 20 個 chunk 印一次統計
-      if (this._audioChunksSent % 20 === 0) {
+      // 每 10 個 chunk 印一次統計（~2.6 秒 @16kHz bufferSize=4096）
+      if (this._audioChunksSent % 10 === 0) {
         console.log('[GeminiLive] 🎤 串流: chunks=%d, bytes=%d, maxAmp=%.4f, maxEver=%.4f, silent=%d',
           this._audioChunksSent, this._audioBytesSent, maxAmp, this._maxAmpEver, this._silentChunks);
       }
     };
 
-    // 連接 audio pipeline（WorkletNode 不需接到 destination）
+    // 連接 audio pipeline
     this._mediaStreamSource.connect(this._workletNode);
 
-    console.log('[GeminiLive] 串流已啟動 (AudioWorklet, sampleRate=%d, chunk=100ms)', this._actualSampleRate);
+    console.log('[GeminiLive] 串流已啟動 (AudioContext @%dHz, capture worklet, chunk=32ms)', this._actualSampleRate);
 
     // 定期記錄音訊統計到 session log
     this._audioStatsInterval = setInterval(() => {
@@ -223,7 +235,7 @@ class GeminiLiveService {
           isStreaming: true
         });
       }
-    }, 30000);  // 每 30 秒
+    }, 30000);
   }
 
   /**
@@ -309,8 +321,14 @@ class GeminiLiveService {
     this._suppressInput = suppress;
     console.log('[GeminiLive]', suppress ? '🔇 暫停麥克風輸入 (AI 播放中)' : '🔈 恢復麥克風輸入');
 
-    // 安全機制: 最多抑制 15 秒後自動恢復（防止 onEnd 沒觸發）
     if (suppress) {
+      // 注意：不在此處送 audioStreamEnd。
+      // audioStreamEnd 適用於使用者「明確暫停麥克風」的 push-to-talk 場景。
+      // 此處的 suppress 是為了防止 AI 播音時的回音，Gemini VAD 已自行偵測到
+      // 使用者說完話（才觸發了生成），再送 audioStreamEnd 反而可能干擾 Gemini
+      // 的生成狀態機，導致後續 user audio 無法被正常接收。
+
+      // 安全機制: 最多抑制 15 秒後自動恢復（防止 onEnd 沒觸發）
       if (this._suppressTimeout) clearTimeout(this._suppressTimeout);
       this._suppressTimeout = setTimeout(() => {
         if (this._suppressInput) {
@@ -324,6 +342,12 @@ class GeminiLiveService {
         this._suppressTimeout = null;
       }
     }
+  }
+
+  _sendAudioStreamEnd() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+    console.log('[GeminiLive] >>> audioStreamEnd sent');
   }
 
   // ==================== Private: WebSocket ====================
@@ -441,12 +465,10 @@ class GeminiLiveService {
 
   _sendRealtimeAudio(base64Chunk) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    // 使用實際 AudioContext 取樣率 — Gemini 會自動重採樣
-    const rate = this._actualSampleRate || 16000;
     const message = {
       realtimeInput: {
         audio: {
-          mimeType: `audio/pcm;rate=${rate}`,
+          mimeType: 'audio/pcm;rate=16000',
           data: base64Chunk
         }
       }
@@ -697,6 +719,19 @@ class GeminiLiveService {
     this._responseStartTime = null;
     this._userSpeechEndTime = null;
     this._ttfc = null;
+  }
+
+  /**
+   * Float32 → Int16 PCM（官方做法）
+   * @returns {ArrayBuffer}
+   */
+  _convertFloat32ToInt16(float32Array) {
+    const int16Array = new Int16Array(float32Array.length);
+    for (let i = 0; i < float32Array.length; i++) {
+      const sample = Math.max(-1, Math.min(1, float32Array[i]));
+      int16Array[i] = sample * 0x7FFF;
+    }
+    return int16Array.buffer;
   }
 
   /**

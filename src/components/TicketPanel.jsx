@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, CheckCircle2, Clock, MapPin, User, Phone, Calendar, CreditCard, AlertCircle, Building2, UtensilsCrossed, Hotel } from 'lucide-react';
+import { FileText, CheckCircle2, Clock, MapPin, User, Phone, Calendar, CreditCard, AlertCircle, Building2, UtensilsCrossed, Stethoscope, Truck } from 'lucide-react';
 import { useCall } from '../context/CallContext';
 
 // 欄位標籤映射
@@ -32,20 +32,28 @@ const fieldLabels = {
   fee: { label: '費用說明', icon: CreditCard },
   holdUntil: { label: '保留至', icon: Clock },
   petNote: { label: '寵物備註', icon: null },
-  cancelPolicy: { label: '取消政策', icon: null }
+  cancelPolicy: { label: '取消政策', icon: null },
+  department: { label: '科別', icon: null },
+  patientId: { label: '身分證字號', icon: User },
+  dob: { label: '生日', icon: Calendar },
+  symptoms: { label: '症狀備註', icon: AlertCircle },
+  trackingNumber: { label: '托運單號', icon: null },
+  newAddress: { label: '新地址', icon: MapPin },
+  requestDate: { label: '指定日期', icon: Calendar }
 };
 
 // 根據單據類型取得圖示
 const getTicketIcon = (type) => {
-  if (type.includes('報修') || type.includes('電信')) return Building2;
+  if (type.includes('報修') || type.includes('電信') || type.includes('費用') || type.includes('方案')) return Building2;
   if (type.includes('訂位') || type.includes('餐')) return UtensilsCrossed;
-  if (type.includes('訂房') || type.includes('飯店') || type.includes('酒店')) return Hotel;
+  if (type.includes('醫療') || type.includes('掛號')) return Stethoscope;
+  if (type.includes('物流') || type.includes('配送') || type.includes('貨件')) return Truck;
   return FileText;
 };
 
 // 根據狀態取得樣式
 const getStatusStyle = (status) => {
-  if (status.includes('已確認') || status.includes('已派工')) {
+  if (status.includes('已確認') || status.includes('處理中')) {
     return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
   }
   if (status.includes('保留') || status.includes('待確認')) {

@@ -8,13 +8,14 @@ import LatencyMonitor from '../components/LatencyMonitor';
 import GeminiLivePanel from '../components/GeminiLivePanel';
 import RestWsPanel from '../components/RestWsPanel';
 import { useCall } from '../context/CallContext';
-import { Phone, Zap, Building2, UtensilsCrossed, Hotel } from 'lucide-react';
+import { Phone, Zap, Building2, UtensilsCrossed, Stethoscope, Truck } from 'lucide-react';
 
 // Icon 映射
 const iconMap = {
   Building2,
   UtensilsCrossed,
-  Hotel
+  Stethoscope,
+  Truck
 };
 
 export default function DemoView() {

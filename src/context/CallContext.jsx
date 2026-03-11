@@ -197,8 +197,10 @@ export function CallProvider({ children }) {
 
       const tryReleaseSuppression = () => {
         if (pendingAudioChunks === 0 && turnComplete) {
-          restWsService.setSuppressInput(false);
-          turnComplete = false; // 重置，準備下一輪
+          turnComplete = false; // 立即重置防止重複觸發
+          // 延遲一個 worklet chunk（256ms）再開麥克風：
+          // 讓喇叭最後殘留的 AI 回音散掉，避免 worklet buffer 邊界的回音觸發 Gemini VAD
+          setTimeout(() => restWsService.setSuppressInput(false), 256);
         }
       };
 
@@ -394,9 +396,10 @@ export function CallProvider({ children }) {
       micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+          // 啟用 AEC 消除喇叭回音，避免 AI 聲音觸發 Gemini VAD 誤判為使用者打斷
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
         }
       });
       mediaStreamRef.current = micStream;
@@ -423,8 +426,10 @@ export function CallProvider({ children }) {
 
       const tryReleaseSuppression = () => {
         if (pendingAudioChunks === 0 && turnComplete) {
-          geminiService.setSuppressInput(false);
-          turnComplete = false;
+          turnComplete = false; // 立即重置防止重複觸發
+          // 延遲一個 worklet chunk（256ms）再開麥克風：
+          // 讓喇叭最後殘留的 AI 回音散掉，避免 worklet buffer 邊界的回音觸發 Gemini VAD
+          setTimeout(() => geminiService.setSuppressInput(false), 256);
         }
       };
 
@@ -600,7 +605,7 @@ export function CallProvider({ children }) {
           }
 
           // 依場景前綴自動生成 ticketId
-          const _prefixMap = { '網路報修單': 'CHT', '費用查詢單': 'CHT', '方案變更單': 'CHT', '訂位單': 'RES', '訂房單': 'HTL' };
+          const _prefixMap = { '網路報修單': 'CHT', '費用查詢單': 'CHT', '方案變更單': 'CHT', '訂位單': 'RES', '醫療掛號單': 'MED', '物流處理單': 'LOG' };
           const _prefix = _prefixMap[args.type] || 'TKT';
           const _dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
           const _autoId = `${_prefix}-${_dateStr}-${String(++_uidCounter).padStart(4, '0')}`;
@@ -644,20 +649,10 @@ export function CallProvider({ children }) {
       addLog(`Session ID: ${response.sessionId}`, 'system');
       addLog('Gemini Live API 已連線', 'system');
 
-      // 播放歡迎語音 (Gemini Live 回傳 raw PCM 24kHz)
-      // 歡迎語播放期間抑制麥克風輸入防止回音
-      const geminiSvc = voiceServiceRef.current.getGeminiLiveService();
-      if (response.audio_base64) {
-        geminiSvc.setSuppressInput(true);
-        audioPlayer.playAudio(response.audio_base64, {
-          isPCM: true,
-          sampleRate: 24000,
-          onEnd: () => {
-            geminiSvc.setSuppressInput(false);
-          }
-        });
-        addLog('播放歡迎語音 (PCM 24kHz)', 'info');
-      }
+      // 歡迎語音訊已由 onAudioChunk 逐 chunk 即時播放完畢
+      // initialize() 回傳後只需通知 suppress 機制「turn 已完成」，讓 tryReleaseSuppression 統一釋放麥克風
+      turnComplete = true;
+      tryReleaseSuppression();
 
       // 加入 AI 歡迎語到對話（同時清除 streamingAiText，歡迎語走 Promise 路徑不會自動清除）
       setStreamingAiText('');
@@ -926,7 +921,7 @@ export function CallProvider({ children }) {
         addLog(`  週末: ${action.weekend}`, action.weekend === '可供應' ? 'success' : 'warning');
         break;
       case 'form_start':
-        addLog(`開始建立${action.formType === 'repair' ? '報修單' : action.formType === 'reservation' ? '訂位單' : '訂房單'}`, 'system');
+        addLog(`開始建立${action.formType === 'repair' ? '報修單' : action.formType === 'reservation' ? '訂位單' : action.formType === 'medical' ? '掛號單' : '物流處理單'}`, 'system');
         break;
       case 'info_provided':
         addLog(`提供資訊: ${action.category}`, 'info');
