@@ -1012,8 +1012,16 @@ export function CallProvider({ children }) {
 
   // 切換靜音
   const toggleMute = useCallback(() => {
-    setIsMuted(prev => !prev);
-    addLog(isMuted ? '麥克風已開啟' : '麥克風已靜音', 'system');
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    addLog(newMuted ? '麥克風已靜音' : '麥克風已開啟', 'system');
+
+    // 實際靜音/取消靜音麥克風 track（Mock 模式無 mediaStream，安全跳過）
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = !newMuted;
+      });
+    }
   }, [isMuted, addLog]);
 
   // 重新開始
