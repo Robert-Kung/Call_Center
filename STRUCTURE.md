@@ -27,10 +27,12 @@ Call_Center/
 │  │  │  ├─ RestWebSocketService.js  # REST WS 代理服務（Gemini Live 協定）
 │  │  │  └─ SessionLogger.js         # 通話 Session 記錄器（本地 JSON）
 │  │  ├─ worklets/
-│  │  │  └─ audioProcessor.worklet.js  # AudioWorklet 處理器（獨立執行緒採集/降採樣）
+│  │  │  ├─ audioProcessor.worklet.js  # AudioWorklet 通用處理器（採集/降採樣，舊版保留）
+│  │  │  ├─ audioCapture.worklet.js   # 麥克風採集 Worklet（128-sample 累積 → 降採樣 → Int16）
+│  │  │  └─ pcmPlayback.worklet.js    # PCM 無縫播放 Worklet（gapless，24kHz Float32 佇列）
 │  │  ├─ hooks/
 │  │  │  ├─ useAudioRecorder.js      # 錄音 Hook（16kHz mono）
-│  │  │  └─ useAudioPlayer.js        # 播放 Hook（佇列式 base64 播放）
+│  │  │  └─ useAudioPlayer.js        # 播放 Hook（直接處理 PCM，透過 pcmPlayback worklet）
 │  │  ├─ data/
 │  │  │  └─ scenarios.js             # Mock 對話腳本（3 場景）
 │  │  ├─ config/
@@ -152,4 +154,4 @@ Express.js 伺服器，提供 REST Live 模式的 ASR→LLM→TTS 處理。
 
 ---
 
-**最後更新**：2026-02-23
+**最後更新**：2026-03-11

@@ -2,7 +2,7 @@
 
 > **任務規劃**: [TASK_PLAN.md](TASK_PLAN.md)  
 > **開發規範**: [../.claude/skills/project-workflow/SKILL.md](../.claude/skills/project-workflow/SKILL.md)  
-> **最後更新**: 2026-03-04
+> **最後更新**: 2026-03-11
 
 ---
 
@@ -17,6 +17,8 @@
 | 4 | 整合測試與優化 | ✅ 已完成 | 1 天 | 0.5 天 |
 | 5 | REST Live 改用 WebSocket 流線 | ✅ 已完成 | 2 天 | 1 天 |
 | 6 | AudioWorklet 音訊採集升級 | ✅ 已完成 | - | - |
+| 7 | 音訊增強與播放重構 | ✅ 已完成 | - | 2026-03-11 |
+| 🔧 | [Hotfix] 靜音按鈕實際效果 | ✅ 已完成 | - | 2026-03-11 |
 
 ---
 
@@ -124,6 +126,42 @@
 
 ---
 
+### Phase 7: 音訊增強與播放重構
+**狀態**: ✅ 2026-03-11 完成（commit `b687165`）
+
+| # | 任務 | 狀態 | 完成日期 | 備註 |
+|---|------|------|----------|------|
+| 7-1 | 新增 `audioCapture.worklet.js` | ✅ | 2026-03-11 | 專用麥克風採集 Worklet；128-sample 累積、可選降採樣、ArrayBuffer 零複製傳輸 |
+| 7-2 | 新增 `pcmPlayback.worklet.js` | ✅ | 2026-03-11 | PCM gapless 播放 Worklet；Float32 佇列、24kHz 輸出、無縫銜接消除靜音縫隙 |
+| 7-3 | 重寫 `useAudioPlayer.js` | ✅ | 2026-03-11 | 改為直接接收 PCM（不再用 base64 WAV）；透過 `pcmPlayback` worklet 播放；精確控制播放時機 |
+| 7-4 | 強化 `GeminiLiveService.js` 回音抑制 | ✅ | 2026-03-11 | 延遲 256ms 釋放麥克風抑制（等喇叭殘音散逸）；強化 onTurnComplete 回調 |
+| 7-5 | 更新 `CallContext.jsx` 抑制時序 | ✅ | 2026-03-11 | 追蹤 `pendingAudioChunks`：全部 chunk 播完 + `turnComplete` 後才解除抑制 |
+| 7-6 | 擴充工單 ID 生成邏輯 | ✅ | 2026-03-11 | `CallContext` 支援更多表單類型；`TicketPanel.jsx` 顯示對應表單欄位 |
+| 7-7 | 強化系統 Prompt | ✅ | 2026-03-11 | `api.js` 三場景 prompt 補充流程說明與 FAQ；音訊擷取/播放參數對齊 WebSocket 規範 |
+| 7-8 | 新增場景圖示 | ✅ | 2026-03-11 | AgentView/ConsumerView/DemoView/SystemView 新增 `Stethoscope`、`Truck` 圖示 |
+| 7-9 | 新增 Gemini Live API Skill | ✅ | 2026-03-11 | `.claude/skills/gemini-live-api-dev/SKILL.md` 252 行完整 WebSocket/VAD/Function Calling 指引 |
+
+**技術設計**:
+- `audioCapture.worklet.js` ↔ `audioProcessor.worklet.js`：功能相同但職責更明確；採集端統一走 `audioCapture`
+- `pcmPlayback.worklet.js`：Float32 ring buffer + 無縫播放，解決舊版 WAV 拼接產生的靜音縫隙
+- `useAudioPlayer.js`：`AudioWorkletNode` + `MessagePort` 接收 PCM chunk，直接排隊至 worklet
+- 回音抑制鏈：`onAudioChunk` 計數 → `turnComplete` → 全部播完 → `setTimeout(256ms)` → `setSuppressInput(false)`
+
+---
+
+### 🔧 Hotfix: 靜音按鈕實際效果
+**狀態**: ✅ 2026-03-11 完成
+
+| # | 任務 | 狀態 | 完成日期 | 備註 |
+|---|------|------|----------|------|
+| H-1 | 修復 `toggleMute` 無效問題 | ✅ | 2026-03-11 | `isMuted` 原只更新 UI 圖示，麥克風音訊照常送出 |
+| H-2 | 實作 `track.enabled` 靜音 | ✅ | 2026-03-11 | 在 `toggleMute` 中對 `mediaStreamRef.current.getAudioTracks()` 設 `enabled=false/true` |
+
+**根因**：`toggleMute()` 只呼叫 `setIsMuted()`，`isMuted` 狀態僅用於 UI icon 切換（`Mic`↔`MicOff`），沒有傳入任何服務層，麥克風 PCM 仍持續送出。  
+**修復**：`MediaStreamTrack.enabled = false` 是 Web 標準靜音方式，音訊 track 輸出靜音訊號；Mock 模式因 `mediaStreamRef.current === null` 安全跳過。
+
+---
+
 ### Phase 6: AudioWorklet 音訊採集升級
 **狀態**: ✅ 2026-02-24 完成
 
@@ -157,3 +195,5 @@
 | 2026-03-04 | ✅ Phase 5 完成：RestWebSocketService 改用 Gemini Live wire protocol，build 驗證通過 |
 | 2026-02-24 | ✅ Phase 6 完成：AudioWorklet 升級（RestWS + GeminiLive），新增 audioProcessor.worklet.js，移除 ScriptProcessor |
 | 2026-03-04 | 移除 ConsumerView/SystemView 殘留 PTT 按鈕（`startRecording`/`stopRecordingAndSend` 已無效）；改為 WS Live 串流狀態指示器（青色，對齊 Gemini Live 紫色） |
+| 2026-03-11 | ✅ Phase 7 完成（commit `b687165`）：新增 audioCapture/pcmPlayback worklet、重寫 useAudioPlayer（PCM gapless）、GeminiLiveService 256ms 延遲抑制釋放、擴充工單類型、強化 prompt、新增 gemini-live-api-dev Skill |
+| 2026-03-11 | 🔧 Hotfix：修復靜音按鈕無效（`toggleMute` 新增 `MediaStreamTrack.enabled` 控制，Mock 模式安全跳過） |
