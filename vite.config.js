@@ -6,6 +6,10 @@ import path from 'path'
 const backendHost = process.env.VITE_BACKEND_HOST || '192.168.2.100';
 const backendPort = process.env.VITE_BACKEND_PORT || '8003';
 
+// Token Server: 本機用 localhost:3005，Docker 環境用 TOKEN_SERVER_HOST（service name）
+const tokenServerHost = process.env.TOKEN_SERVER_HOST || 'localhost';
+const tokenServerPort = process.env.TOKEN_SERVER_PORT || '3005';
+
 // Session Log Plugin — 接收前端 POST 的對話記錄，寫入 data/ 資料夾 + Docker log
 function sessionLogPlugin() {
   const dataDir = path.resolve(process.cwd(), 'data');
@@ -245,6 +249,12 @@ export default defineConfig({
     },
     // Proxy for voice assistant backend API (排除 session-log — 由 plugin 處理)
     proxy: {
+      // Gemini Token Server proxy (必須放在 /api 之前，讓更具體的路徑優先匹配)
+      // Docker 環境設 TOKEN_SERVER_HOST=token-server，本機預設 localhost:3005
+      '/api/gemini-token': {
+        target: `http://${tokenServerHost}:${tokenServerPort}`,
+        changeOrigin: true,
+      },
       '/api': {
         target: `http://${backendHost}:${backendPort}`,
         changeOrigin: true,

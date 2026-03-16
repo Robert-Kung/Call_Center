@@ -6,7 +6,12 @@
       "Bash(docker logs ai-voice-assistant-demo)",
       "Bash(test:*)",
       "Bash(docker logs:*)",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(ss:*)",
+      "Bash(npm install:*)",
+      "Bash(timeout 5 node:*)",
+      "Bash(curl:*)",
+      "Bash(node -e:*)"
     ],
     "additionalDirectories": [
       "/home/user/Call_Center /src/views"

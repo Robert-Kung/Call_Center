@@ -1,0 +1,16 @@
+{
+  "name": "gemini-token-server",
+  "version": "1.0.0",
+  "description": "Gemini Live Ephemeral Token Server - 安全簽發短效 token，避免 API key 暴露在前端",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  }
+}

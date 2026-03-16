@@ -19,5 +19,23 @@ services:
       - .env
     environment:
       - NODE_ENV=development
+      # 告訴 Vite proxy 轉發到 Docker 內部的 token-server service
+      - TOKEN_SERVER_HOST=token-server
+      - TOKEN_SERVER_PORT=3005
     command: ["npm", "run", "dev"]
+    restart: unless-stopped
+    depends_on:
+      - token-server
+
+  token-server:
+    image: node:20-alpine
+    container_name: gemini-token-server
+    working_dir: /app
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./token-server:/app
+    env_file:
+      - ./token-server/.env
+    command: sh -c "npm install && npm start"
     restart: unless-stopped

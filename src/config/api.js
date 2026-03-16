@@ -204,14 +204,21 @@ export const REST_WS_CONFIG = {
 // ==================== Gemini Live Configuration ====================
 
 export const GEMINI_CONFIG = {
-  // API Key - 從環境變數讀取
+  // API Key - 僅保留作 fallback (開發用途)；正式環境請使用 tokenServerUrl + ephemeral token
   apiKey: import.meta.env.VITE_GEMINI_API_KEY || '',
+
+  // Token Server URL - 前端向此端點取得 ephemeral token
+  // 空字串表示不啟用 ephemeral token，直接 fallback 使用 apiKey
+  tokenServerUrl: import.meta.env.VITE_TOKEN_SERVER_URL || '/api/gemini-token',
 
   // 模型設定
   model: import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025',
 
   // WebSocket URL
+  // v1beta: 使用 API key 時
   wsUrl: 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent',
+  // v1alpha + Constrained: 使用 ephemeral token 時，endpoint 必須為 BidiGenerateContentConstrained
+  wsUrlAlpha: 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained',
 
   // 語音設定
   voice: {

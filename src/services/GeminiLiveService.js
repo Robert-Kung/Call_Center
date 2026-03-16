@@ -60,6 +60,8 @@ class GeminiLiveService {
     this._audioChunksSent = 0;
     this._audioBytesSent = 0;
     this._audioStatsInterval = null;
+
+    // 注意：ephemeral token 為單次使用（uses=1），每次通話必須重新申請，不快取
   }
 
   // ==================== Public API ====================
@@ -70,8 +72,8 @@ class GeminiLiveService {
   async initialize(scenario) {
     const startTime = performance.now();
 
-    if (!this.apiKey) {
-      throw new Error('Gemini API Key 未設定。請在 .env 設定 VITE_GEMINI_API_KEY');
+    if (!this.apiKey && !GEMINI_CONFIG.tokenServerUrl) {
+      throw new Error('Gemini 認證未設定。請設定 token-server 或在 .env 設定 VITE_GEMINI_API_KEY');
     }
 
     // 生成 session ID
@@ -352,9 +354,49 @@ class GeminiLiveService {
 
   // ==================== Private: WebSocket ====================
 
+  /**
+   * 從 token-server 取得 ephemeral token
+   *
+   * 注意：token 設定 uses=1（單次使用）且 newSessionExpireTime=1分鐘
+   * 因此每次建立新通話必須申請全新 token，不可快取重用。
+   * @returns {Promise<string|null>} token 字串，或 null（表示應 fallback 用 apiKey）
+   */
+  async _getEphemeralToken() {
+    const tokenServerUrl = GEMINI_CONFIG.tokenServerUrl;
+    if (!tokenServerUrl) return null;
+
+    try {
+      const response = await fetch(tokenServerUrl, { method: 'POST' });
+      if (!response.ok) {
+        const text = await response.text();
+        console.warn('[GeminiLive] Token server 回應錯誤:', response.status, text);
+        return null;
+      }
+      const { token } = await response.json();
+      console.log('[GeminiLive] 成功取得 ephemeral token（每次通話獨立申請）');
+      return token;
+    } catch (err) {
+      console.warn('[GeminiLive] 無法取得 ephemeral token，將 fallback 使用 API key:', err.message);
+      return null;
+    }
+  }
+
   async _connect() {
+    // 優先使用 ephemeral token，fallback 到 API key
+    let url;
+    const ephemeralToken = await this._getEphemeralToken();
+    if (ephemeralToken) {
+      // ephemeral token 只支援 v1alpha（官方規定）
+      // token 格式為 "auth_tokens/xxx"，其中 "/" 必須 URL encode，否則瀏覽器解析 URL 時會截斷
+      url = `${GEMINI_CONFIG.wsUrlAlpha}?access_token=${encodeURIComponent(ephemeralToken)}`;
+      console.log('[GeminiLive] 使用 ephemeral token 連線 (v1alpha)');
+    } else {
+      // API key fallback 使用 v1beta
+      url = `${GEMINI_CONFIG.wsUrl}?key=${this.apiKey}`;
+      console.log('[GeminiLive] Fallback: 使用 API key 連線 (v1beta)');
+    }
+
     return new Promise((resolve, reject) => {
-      const url = `${GEMINI_CONFIG.wsUrl}?key=${this.apiKey}`;
       console.log('[GeminiLive] 正在連線...');
       this.ws = new WebSocket(url);
       this.ws.binaryType = 'blob';
