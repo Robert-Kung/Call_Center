@@ -178,9 +178,24 @@ class GeminiLiveService {
 
     // 接收 worklet 的 float32 PCM（已是 16kHz，由 AudioContext 硬體降採樣）
     // 主執行緒只做 float32→int16 轉換 + base64 編碼
+    this._suppressedChunks = 0; // [診斷] 記錄被 suppress 跳過的 chunk 數
     this._workletNode.port.onmessage = (event) => {
-      if (!this._isStreaming || this._suppressInput) return;
       if (event.data.type !== 'audio') return;
+      if (!this._isStreaming) return;
+      if (this._suppressInput) {
+        this._suppressedChunks++;
+        // 每 4 個被壓制的 chunk log 一次（~1 秒）
+        if (this._suppressedChunks % 4 === 1) {
+          console.log('[Suppress] 🔇 worklet chunk 被 suppress 跳過 (累計=%d)', this._suppressedChunks);
+        }
+        return;
+      }
+      // suppress 剛解除後，log 一次恢復訊息
+      if (this._suppressedChunks > 0) {
+        console.log('[Suppress] 🔈 worklet 恢復送出 (共跳過 %d chunks，約 %dms)',
+          this._suppressedChunks, Math.round(this._suppressedChunks * 256));
+        this._suppressedChunks = 0;
+      }
 
       const float32 = event.data.data;  // Float32Array @16kHz
 
@@ -320,8 +335,14 @@ class GeminiLiveService {
    * @param {boolean} suppress - true=暫停送出, false=恢復送出
    */
   setSuppressInput(suppress) {
+    const prev = this._suppressInput;
     this._suppressInput = suppress;
-    console.log('[GeminiLive]', suppress ? '🔇 暫停麥克風輸入 (AI 播放中)' : '🔈 恢復麥克風輸入');
+    const ts = performance.now().toFixed(0);
+    console.log('[Suppress] setSuppressInput: %s → %s  @%sms',
+      prev ? 'suppressed' : 'open', suppress ? 'suppressed' : 'open', ts);
+    if (prev === suppress) {
+      console.warn('[Suppress] ⚠ 狀態未變化，重複呼叫！');
+    }
 
     if (suppress) {
       // 注意：不在此處送 audioStreamEnd。

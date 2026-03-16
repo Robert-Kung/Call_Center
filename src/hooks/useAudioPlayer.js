@@ -175,10 +175,20 @@ export function useAudioPlayer(options = {}) {
       if (onEnd) {
         const durationMs = (float32.length / sampleRate) * 1000;
         const now = performance.now();
+        const prevEndTime = pcmPlaybackEndTimeRef.current;
         pcmPlaybackEndTimeRef.current = Math.max(pcmPlaybackEndTimeRef.current, now) + durationMs;
         const delayMs = pcmPlaybackEndTimeRef.current - now;
+        // [診斷] 若 delayMs 遠超 durationMs，代表 endTimeRef 殘留自前一輪
+        if (delayMs > durationMs + 500) {
+          console.warn('[AudioPlayer] ⚠ onEnd 延遲過大: delayMs=%.0fms, durationMs=%.0fms, prevEndTime=%.0f, now=%.0f (可能跨輪累積)',
+            delayMs, durationMs, prevEndTime, now);
+        }
         const timerId = setTimeout(() => {
           pcmPendingTimerIdsRef.current = pcmPendingTimerIdsRef.current.filter(id => id !== timerId);
+          // 所有 pending timer 都觸發完畢 → 重置 endTimeRef，防止跨輪累積造成下一輪 onEnd 延遲
+          if (pcmPendingTimerIdsRef.current.length === 0) {
+            pcmPlaybackEndTimeRef.current = 0;
+          }
           onEnd();
         }, delayMs);
         pcmPendingTimerIdsRef.current.push(timerId);

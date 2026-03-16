@@ -425,10 +425,12 @@ export function CallProvider({ children }) {
       let turnComplete = false;
 
       const tryReleaseSuppression = () => {
+        console.log('[Suppress] tryRelease: pendingChunks=%d, turnComplete=%s', pendingAudioChunks, turnComplete);
         if (pendingAudioChunks === 0 && turnComplete) {
           turnComplete = false; // 立即重置防止重複觸發
           // 延遲一個 worklet chunk（256ms）再開麥克風：
           // 讓喇叭最後殘留的 AI 回音散掉，避免 worklet buffer 邊界的回音觸發 Gemini VAD
+          console.log('[Suppress] 條件滿足，256ms 後釋放麥克風');
           setTimeout(() => geminiService.setSuppressInput(false), 256);
         }
       };
@@ -446,6 +448,7 @@ export function CallProvider({ children }) {
       // ---- 即時音訊串流 (逐 chunk 播放，不等 turnComplete) ----
       geminiService.onAudioChunk = (chunkBase64) => {
         pendingAudioChunks++;
+        console.log('[Suppress] onAudioChunk 到達，pendingChunks=%d', pendingAudioChunks);
         // 第一個 chunk 到達時開始抑制麥克風（防止回音）
         if (pendingAudioChunks === 1) {
           geminiService.setSuppressInput(true);
@@ -455,6 +458,7 @@ export function CallProvider({ children }) {
           sampleRate: 24000,
           onEnd: () => {
             pendingAudioChunks--;
+            console.log('[Suppress] onEnd 觸發，pendingChunks=%d', pendingAudioChunks);
             tryReleaseSuppression();
           }
         });
@@ -490,6 +494,7 @@ export function CallProvider({ children }) {
         }
 
         // 音訊已由 onAudioChunk 逐 chunk 播放，此處只處理 suppress 釋放時機
+        console.log('[Suppress] onResponseComplete，pendingChunks=%d → 設 turnComplete=true', pendingAudioChunks);
         turnComplete = true;
         tryReleaseSuppression();
 
