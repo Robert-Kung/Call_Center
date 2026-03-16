@@ -541,6 +541,8 @@ export function CallProvider({ children }) {
       geminiService.onConnectionChange = (status) => {
         console.log('[CallContext] Gemini 連線狀態:', status);
         setGeminiConnectionStatus(status);
+        // 同步更新 connectionStatus，讓自動掛斷 useEffect 能偵測到斷線
+        setConnectionStatus(status);
         if (status === 'disconnected' && callState === 'connected') {
           addLog('Gemini Live 連線中斷', 'warning');
         }

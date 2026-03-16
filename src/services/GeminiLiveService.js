@@ -300,7 +300,12 @@ class GeminiLiveService {
   close() {
     this.stopStreaming();
     if (this.ws) {
-      this.ws.close();
+      // 先移除事件 handler，避免 close() 觸發 onclose 重複通知
+      this.ws.onopen = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.onmessage = null;
+      try { this.ws.close(); } catch { /* 忽略已關閉的 socket */ }
       this.ws = null;
     }
     this.isConnected = false;
@@ -437,15 +442,39 @@ class GeminiLiveService {
       };
 
       this.ws.onclose = (event) => {
-        console.log('[GeminiLive] WebSocket 已關閉:', event.code, event.reason);
         const wasConnected = this.isConnected;
         this.isConnected = false;
+
+        // 根據 close code 提供更明確的錯誤訊息
+        const closeReasons = {
+          1000: '正常關閉',
+          1001: '端點離開',
+          1006: '連線異常中斷（無 close frame）',
+          1008: '政策違規',
+          1011: 'Gemini 伺服器內部錯誤',
+          1012: '伺服器重啟',
+          1013: '伺服器過載',
+          1014: '無效的閘道回應',
+        };
+        const reasonText = closeReasons[event.code] || event.reason || '未知原因';
+        console.warn('[GeminiLive] WebSocket 已關閉: code=%d reason="%s" (%s) wasConnected=%s',
+          event.code, event.reason, reasonText, wasConnected);
+
+        // 記錄到 session log
+        sessionLogger.log('ws_close', {
+          code: event.code,
+          reason: event.reason,
+          reasonText,
+          wasConnected,
+          wasStreaming: this._isStreaming,
+        });
+
         this.stopStreaming();
         this._notifyConnectionChange('disconnected');
 
         // 如果是非預期關閉，通知錯誤
         if (wasConnected && event.code !== 1000) {
-          const err = new Error(`WebSocket 已關閉: ${event.code} ${event.reason}`);
+          const err = new Error(`WebSocket 已關閉: ${event.code} ${reasonText}`);
           this._rejectHandler('response', err);
           if (this.onError) this.onError(err);
         }
