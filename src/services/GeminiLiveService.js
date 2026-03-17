@@ -11,7 +11,7 @@
  *   initialize(scenario) → startStreaming(mediaStream) → [callback driven] → stopStreaming() → close()
  */
 
-import { GEMINI_CONFIG, GEMINI_SYSTEM_PROMPTS, WELCOME_MESSAGES, GEMINI_TOOL_DECLARATIONS } from '../config/api';
+import { GEMINI_CONFIG, GEMINI_SYSTEM_PROMPTS, WELCOME_MESSAGES, GEMINI_TOOL_DECLARATIONS, buildDateContext } from '../config/api';
 import { sessionLogger } from './SessionLogger';
 
 class GeminiLiveService {
@@ -39,6 +39,10 @@ class GeminiLiveService {
     // 輸入抑制 (AI 播放音訊時暫停送出麥克風資料，防止回音)
     this._suppressInput = false;
 
+    // Tool call 鎖 (toolCall 收到 → toolResponse 送出期間，暫停送音訊)
+    // Gemini server 在此期間拒絕所有 sendRealtimeInput，持續送會導致 1011
+    this._inToolCall = false;
+
     // 事件回調 (由外部設定)
     this.onResponseComplete = null;   // ({ audio, aiText, userText, latency, tokenUsage }) => void
     this.onAudioChunk = null;         // (base64AudioChunk) => void  (即時音訊片段)
@@ -50,6 +54,13 @@ class GeminiLiveService {
 
     // Promise-based handler (用於 initialize 的歡迎語)
     this._messageHandlers = new Map();
+
+    // 重連機制
+    this._lastResumptionHandle = null;  // Session Resumption Token（重連時使用）
+    this._lastSystemPrompt = null;       // 最後一次 setup 的 system prompt（重連重用）
+    this._intentionalClose = false;      // true = close() 手動呼叫，不觸發 onError
+    this._isReconnecting = false;        // true = reconnect() 進行中，onopen 不通知 'connected'
+    this.onGoAway = null;               // (secondsLeft: number) => void
 
     // 回應計時
     this._responseStartTime = null;    // 使用者說話結束時間（VAD 偵測末次 inputTranscription）
@@ -84,7 +95,9 @@ class GeminiLiveService {
 
     // 發送 setup
     const systemPrompt = scenario.systemPrompt || GEMINI_SYSTEM_PROMPTS[scenario.id] || this._getDefaultPrompt(scenario);
-    await this._sendSetupMessage(systemPrompt);
+    const fullPrompt = buildDateContext() + systemPrompt;
+    this._lastSystemPrompt = fullPrompt;  // 重連時重用
+    await this._sendSetupMessage(fullPrompt);
 
     // 開始 session 記錄
     sessionLogger.startSession(this.sessionId, scenario.id, scenario.name);
@@ -139,15 +152,18 @@ class GeminiLiveService {
     // 瀏覽器硬體自動將麥克風 48kHz 降採樣至 16kHz，品質優於 JS 手寫降採樣
     // ref: https://github.com/google-gemini/gemini-live-api-examples/.../mediaUtils.js
     const TARGET_SAMPLE_RATE = 16000;
-    this._audioContext = new (window.AudioContext || window.webkitAudioContext)({
+    // 使用 local 變數儲存 AudioContext，避免 addModule() await 期間
+    // stopStreaming() 將 this._audioContext 設為 null 導致 race condition
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
       sampleRate: TARGET_SAMPLE_RATE
     });
-    this._actualSampleRate = this._audioContext.sampleRate;
+    this._audioContext = audioCtx;
+    this._actualSampleRate = audioCtx.sampleRate;
 
     console.log('[GeminiLive] AudioContext sampleRate: %d (目標 16kHz)', this._actualSampleRate);
 
     // 連接麥克風
-    this._mediaStreamSource = this._audioContext.createMediaStreamSource(mediaStream);
+    this._mediaStreamSource = audioCtx.createMediaStreamSource(mediaStream);
 
     // 確認 MediaStream 的 track 設定
     const audioTrack = mediaStream.getAudioTracks()[0];
@@ -169,8 +185,17 @@ class GeminiLiveService {
     // 載入 capture worklet（對齊官方做法：worklet 只採集 float32，不做轉換）
     // 官方 bufferSize=4096 → 256ms @16kHz（大 chunk 讓 Gemini VAD 更穩定）
     const workletUrl = new URL('../worklets/audioCapture.worklet.js', import.meta.url);
-    await this._audioContext.audioWorklet.addModule(workletUrl);
-    this._workletNode = new AudioWorkletNode(this._audioContext, 'audio-capture-processor', {
+    await audioCtx.audioWorklet.addModule(workletUrl);
+
+    // Guard: addModule() await 期間若 stopStreaming() 已被呼叫，則中止並清理
+    if (!this._isStreaming) {
+      console.warn('[GeminiLive] startStreaming 中止：addModule 期間 stopStreaming 被呼叫');
+      if (audioCtx.state !== 'closed') audioCtx.close();
+      this._audioContext = null;
+      return;
+    }
+
+    this._workletNode = new AudioWorkletNode(audioCtx, 'audio-capture-processor', {
       processorOptions: {
         bufferSize: 4096   // 4096 samples @16kHz = 256ms（與官方一致）
       }
@@ -182,17 +207,24 @@ class GeminiLiveService {
     this._workletNode.port.onmessage = (event) => {
       if (event.data.type !== 'audio') return;
       if (!this._isStreaming) return;
+      // P5: tool call 期間 Gemini server 拒絕所有 realtimeInput，直接丟棄避免 1011
+      if (this._inToolCall) return;
       if (this._suppressInput) {
         this._suppressedChunks++;
         // 每 4 個被壓制的 chunk log 一次（~1 秒）
         if (this._suppressedChunks % 4 === 1) {
-          console.log('[Suppress] 🔇 worklet chunk 被 suppress 跳過 (累計=%d)', this._suppressedChunks);
+          console.log('[Suppress] 🔇 suppress 中，送靜音給 Gemini (累計=%d chunks)', this._suppressedChunks);
         }
+        // 送全零 PCM 給 Gemini，保持 VAD 熱機，避免 suppress 結束後需要冷啟動
+        const silence = new Float32Array(event.data.data.length);
+        const silPcm16 = this._convertFloat32ToInt16(silence);
+        const silB64 = this._int16BufferToBase64(silPcm16);
+        this._sendRealtimeAudio(silB64);
         return;
       }
       // suppress 剛解除後，log 一次恢復訊息
       if (this._suppressedChunks > 0) {
-        console.log('[Suppress] 🔈 worklet 恢復送出 (共跳過 %d chunks，約 %dms)',
+        console.log('[Suppress] 🔈 worklet 恢復送出 (suppress 期間共送靜音 %d chunks，約 %dms)',
           this._suppressedChunks, Math.round(this._suppressedChunks * 256));
         this._suppressedChunks = 0;
       }
@@ -233,8 +265,7 @@ class GeminiLiveService {
 
       // 每 10 個 chunk 印一次統計（~2.6 秒 @16kHz bufferSize=4096）
       if (this._audioChunksSent % 10 === 0) {
-        console.log('[GeminiLive] 🎤 串流: chunks=%d, bytes=%d, maxAmp=%.4f, maxEver=%.4f, silent=%d',
-          this._audioChunksSent, this._audioBytesSent, maxAmp, this._maxAmpEver, this._silentChunks);
+        console.log(`[GeminiLive] 🎤 串流: chunks=${this._audioChunksSent}, bytes=${this._audioBytesSent}, maxAmp=${maxAmp.toFixed(4)}, maxEver=${this._maxAmpEver.toFixed(4)}, silent=${this._silentChunks}`);
       }
     };
 
@@ -298,6 +329,7 @@ class GeminiLiveService {
    * 關閉連線
    */
   close() {
+    this._intentionalClose = true;
     this.stopStreaming();
     if (this.ws) {
       // 先移除事件 handler，避免 close() 觸發 onclose 重複通知
@@ -372,6 +404,71 @@ class GeminiLiveService {
     }
   }
 
+  /**
+   * 發送系統隱藏訊息給 Gemini（不顯示在 UI，用於自動掛斷等系統觸發場景）
+   */
+  sendSystemMessage(text) {
+    this._sendTextMessage(text);
+  }
+
+  /**
+   * 重新連線（意外斷線或 GoAway 通知後呼叫）
+   * 若有 _lastResumptionHandle 可恢復對話脈絡（token 有效 2 小時）
+   * @param {MediaStream} mediaStream - 麥克風串流（用於重新開始 audio streaming）
+   */
+  async reconnect(mediaStream) {
+    console.log('[GeminiLive] 🔄 開始重新連線... (handle: %s)',
+      this._lastResumptionHandle ? '已儲存' : '無');
+
+    this._isReconnecting = true;
+
+    try {
+      // 清理舊 streaming（不走 close()，避免清除 resumption handle 等狀態）
+      this.stopStreaming();
+      if (this.ws) {
+        this.ws.onopen = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.onmessage = null;
+        try { this.ws.close(); } catch { /* 忽略 */ }
+        this.ws = null;
+      }
+      this.isConnected = false;
+      this._intentionalClose = false;
+      this._resetBuffers();
+
+      // P2: 重置 suppress 與 tool call 狀態，避免斷線前殘留導致重連後異常
+      this._suppressInput = false;
+      this._inToolCall = false;
+      if (this._suppressTimeout) {
+        clearTimeout(this._suppressTimeout);
+        this._suppressTimeout = null;
+      }
+      if (this._toolCallGraceTimer) {
+        clearTimeout(this._toolCallGraceTimer);
+        this._toolCallGraceTimer = null;
+      }
+
+      // 建立新連線（會取得新的 ephemeral token，因為舊 token 已 uses=1 用盡）
+      await this._connect();
+
+      // 重新 setup（帶入 resumption handle 保留對話脈絡）
+      if (this._lastSystemPrompt) {
+        await this._sendSetupMessage(this._lastSystemPrompt, this._lastResumptionHandle);
+      }
+
+      // 重新開始音訊串流
+      if (mediaStream) {
+        await this.startStreaming(mediaStream);
+      }
+
+      console.log('[GeminiLive] ✓ 重新連線完成 (context: %s)',
+        this._lastResumptionHandle ? '已恢復' : '全新 session');
+    } finally {
+      this._isReconnecting = false;
+    }
+  }
+
   _sendAudioStreamEnd() {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
@@ -430,20 +527,29 @@ class GeminiLiveService {
       this.ws.onopen = () => {
         console.log('[GeminiLive] WebSocket 已連線');
         this.isConnected = true;
-        this._notifyConnectionChange('connected');
+        // 重連過程中不通知 'connected'，由 reconnect() 完成後統一通知
+        if (!this._isReconnecting) {
+          this._notifyConnectionChange('connected');
+        }
         resolve();
       };
 
       this.ws.onerror = (error) => {
         console.error('[GeminiLive] WebSocket 錯誤:', error);
-        this.isConnected = false;
-        this._notifyConnectionChange('error');
-        reject(new Error('WebSocket 連線失敗'));
+        if (!this.isConnected) {
+          // 初始連線失敗（onopen 尚未觸發）→ 通知錯誤並 reject promise
+          this._notifyConnectionChange('error');
+          reject(new Error('WebSocket 連線失敗'));
+        }
+        // 已連線後的錯誤（1006/1011 等）：不動 isConnected，
+        // onclose 一定緊接著觸發，讓 onclose 統一處理 wasConnected 判斷與重連
       };
 
       this.ws.onclose = (event) => {
         const wasConnected = this.isConnected;
         this.isConnected = false;
+        const wasIntentional = this._intentionalClose;
+        this._intentionalClose = false; // 重置，供下次 connect 使用
 
         // 根據 close code 提供更明確的錯誤訊息
         const closeReasons = {
@@ -457,8 +563,8 @@ class GeminiLiveService {
           1014: '無效的閘道回應',
         };
         const reasonText = closeReasons[event.code] || event.reason || '未知原因';
-        console.warn('[GeminiLive] WebSocket 已關閉: code=%d reason="%s" (%s) wasConnected=%s',
-          event.code, event.reason, reasonText, wasConnected);
+        console.warn('[GeminiLive] WebSocket 已關閉: code=%d reason="%s" (%s) wasConnected=%s intentional=%s',
+          event.code, event.reason, reasonText, wasConnected, wasIntentional);
 
         // 記錄到 session log
         sessionLogger.log('ws_close', {
@@ -466,14 +572,15 @@ class GeminiLiveService {
           reason: event.reason,
           reasonText,
           wasConnected,
+          wasIntentional,
           wasStreaming: this._isStreaming,
         });
 
         this.stopStreaming();
         this._notifyConnectionChange('disconnected');
 
-        // 如果是非預期關閉，通知錯誤
-        if (wasConnected && event.code !== 1000) {
+        // 非預期關閉（且非手動 close()）才通知錯誤
+        if (wasConnected && event.code !== 1000 && !wasIntentional) {
           const err = new Error(`WebSocket 已關閉: ${event.code} ${reasonText}`);
           this._rejectHandler('response', err);
           if (this.onError) this.onError(err);
@@ -501,7 +608,7 @@ class GeminiLiveService {
 
   // ==================== Private: Messages ====================
 
-  async _sendSetupMessage(systemPrompt) {
+  async _sendSetupMessage(systemPrompt, resumptionHandle = null) {
     const setupMessage = {
       setup: {
         model: `models/${GEMINI_CONFIG.model}`,
@@ -521,8 +628,10 @@ class GeminiLiveService {
         },
         // Function Calling — tools 必須放在 setup 頂層（與 generationConfig 同級）
         // 官方格式: tools: [{ functionDeclarations: [...] }]
-        // analyze_intent 設有 behavior.scheduling='SILENT'，toolResponse 後 Gemini 靜默不產生新語音
-        // create_ticket 使用預設行為，toolResponse 後 Gemini 口頭確認單據建立
+        // analyze_intent: blocking 模式（刻意不設 NON_BLOCKING）。
+        //   toolResponse 由前端立即回傳（<20ms），靜默效果由系統提示「靜默原則」達成。
+        //   NON_BLOCKING 會導致在 IDLE 時等待到 toolResponse 再主動開口（自問自答）。
+        // create_ticket: 預設同步行為，toolResponse 後 Gemini 口頭確認單據建立。
         tools: [{
           functionDeclarations: GEMINI_TOOL_DECLARATIONS
         }],
@@ -537,10 +646,18 @@ class GeminiLiveService {
             endOfSpeechSensitivity: GEMINI_CONFIG.vad.endOfSpeechSensitivity,
             startOfSpeechSensitivity: GEMINI_CONFIG.vad.startOfSpeechSensitivity
           }
-        }
+        },
+        // Context Window Compression：避免 15 分鐘硬性截止，使用滑動視窗壓縮舊脈絡
+        contextWindowCompression: { slidingWindow: {} },
+        // Session Resumption：必須在首次連線就包含 sessionResumption（即使無 handle），
+        // 否則伺服器不會傳送 sessionResumptionUpdate 訊息，導致重連無法恢復上下文。
+        // 首次連線: sessionResumption: {} → 啟用功能，伺服器開始發送 handle
+        // 重連時: sessionResumption: { handle: '...' } → 恢復對話脈絡（handle 有效期 2 小時）
+        sessionResumption: resumptionHandle ? { handle: resumptionHandle } : {}
       }
     };
-    console.log('[GeminiLive] Setup 包含 %d 個 tool declarations', GEMINI_TOOL_DECLARATIONS.length);
+    console.log('[GeminiLive] Setup 包含 %d 個 tool declarations, resumption=%s',
+      GEMINI_TOOL_DECLARATIONS.length, resumptionHandle ? '有' : '無');
     this._sendMessage(setupMessage);
     return this._waitForSetupComplete();
   }
@@ -723,11 +840,36 @@ class GeminiLiveService {
         if (this.onError) this.onError(err);
       }
 
+      // Session Resumption Token 更新（保存最新 handle，重連時使用）
+      // 只保留 resumable=true 的 handle；resumable=false 代表此時間點無法恢復（如 tool call 期間）
+      if (message.sessionResumptionUpdate) {
+        const update = message.sessionResumptionUpdate;
+        if (update.resumable && update.newHandle) {
+          this._lastResumptionHandle = update.newHandle;
+          console.log('[GeminiLive] Session handle 已更新 (resumable token)');
+        }
+      }
+
+      // GoAway：伺服器即將關閉連線（預警，通知 CallContext 準備重連）
+      if (message.goAway) {
+        const timeLeft = message.goAway.timeLeft;
+        let secondsLeft = 0;
+        if (timeLeft && typeof timeLeft === 'object' && timeLeft.seconds) {
+          secondsLeft = Number(timeLeft.seconds);
+        } else if (typeof timeLeft === 'string') {
+          secondsLeft = parseInt(timeLeft) || 0;
+        }
+        console.warn('[GeminiLive] ⚠ GoAway: 伺服器將在 %ds 後關閉連線', secondsLeft);
+        if (this.onGoAway) this.onGoAway(secondsLeft);
+      }
+
       // [Primary] Live API 的 Function Calling — toolCall 是獨立的頂層訊息類型
       // 官方格式: { toolCall: { functionCalls: [{ id, name, args }] } }
       if (message.toolCall) {
         const calls = message.toolCall.functionCalls || [];
-        console.log('[GeminiLive] 🔧 收到 toolCall，共 %d 個 function calls', calls.length);
+        console.log('[GeminiLive] 🔧 收到 toolCall，共 %d 個 function calls，暫停送音訊 (P5)', calls.length);
+        // P5: 設鎖，toolResponse 送出後解鎖（在 _sendFunctionResponse 中）
+        this._inToolCall = true;
         for (const fc of calls) {
           this._handleFunctionCall(fc);
         }
@@ -749,9 +891,11 @@ class GeminiLiveService {
 
     sessionLogger.log('function_call', { name, id, args });
 
-    // === analyze_intent：更新 UI，送出 ack 給 Gemini ===
-    // scheduling='SILENT'：Gemini 收到 toolResponse 後靜默，不產生新語音回應
-    // 避免 toolResponse ack → 觸發第二次 turnComplete → 雙重語音播放
+    // === analyze_intent (blocking)：更新 UI，立即回傳 toolResponse 給 Gemini ===
+    // Blocking 模式：Gemini 短暫暫停語音等待 toolResponse（<20ms，人耳察覺不到）。
+    // 刻意不使用 NON_BLOCKING，因為 NON_BLOCKING + SILENT 會在 Gemini IDLE 時
+    // 觸發主動補充語音，與系統提示「靜默原則」衝突導致自問自答。
+    // scheduling: 'SILENT' 在 blocking 模式下被 Gemini 忽略（由系統提示規則 2 達成靜默）。
     if (name === 'analyze_intent') {
       if (this.onToolCall) {
         try { this.onToolCall({ name, args, id }); } catch (e) {
@@ -799,6 +943,15 @@ class GeminiLiveService {
     console.log('[GeminiLive] >>> toolResponse:', functionName, 'result:', JSON.stringify(result).substring(0, 100));
     sessionLogger.log('function_response', { name: functionName, id: callId, result });
     this._sendMessage(message);
+    // P5: toolResponse 送出後，延遲 300ms 才解除鎖
+    // Server 收到 toolResponse 後需要時間完成狀態轉換（tool call → ready）
+    // 在此期間繼續送音訊會觸發 1011，grace period 覆蓋這段過渡時間
+    if (this._toolCallGraceTimer) clearTimeout(this._toolCallGraceTimer);
+    this._toolCallGraceTimer = setTimeout(() => {
+      this._inToolCall = false;
+      this._toolCallGraceTimer = null;
+      console.log('[GeminiLive] _inToolCall 解除 (300ms grace period 結束)');
+    }, 300);
   }
 
   // ==================== Private: Helpers ====================

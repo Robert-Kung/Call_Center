@@ -112,6 +112,14 @@ export function useAudioPlayer(options = {}) {
       pcmGainRef.current = gainNode;
       pcmInitializedRef.current = true;
 
+      // 接收 worklet 回傳的 stats（由 queryStats 觸發）
+      workletNode.port.onmessage = (e) => {
+        if (e.data?.type === 'stats') {
+          console.log('[AudioPlayer] worklet stats: queueLen=%d, received=%d samples, played=%d samples',
+            e.data.queueLength, e.data.totalReceived, e.data.totalPlayed);
+        }
+      };
+
       // 立即 resume（autoplay policy）
       if (ctx.state === 'suspended') {
         await ctx.resume();
@@ -160,6 +168,11 @@ export function useAudioPlayer(options = {}) {
 
       // 官方做法：直接 postMessage 到 worklet
       if (pcmWorkletRef.current) {
+        // [診斷] 若 AudioContext 被暫停，嘗試 resume 並記錄
+        if (ctx.state !== 'running') {
+          console.warn('[AudioPlayer] ⚠ ctx.state=%s，嘗試 resume', ctx.state);
+          ctx.resume().catch(e => console.error('[AudioPlayer] resume 失敗', e));
+        }
         pcmWorkletRef.current.port.postMessage(float32);
       } else {
         console.warn('[AudioPlayer] pcmWorkletRef is null, audio dropped!');

@@ -20,6 +20,14 @@ class PCMPlaybackProcessor extends AudioWorkletProcessor {
         this.audioQueue = [];
         this._totalPlayed = 0;
         console.log('[PCMPlayback] interrupt — queue cleared');
+      } else if (event.data === 'queryStats') {
+        // 主執行緒查詢 worklet 內部狀態
+        this.port.postMessage({
+          type: 'stats',
+          queueLength: this.audioQueue.length,
+          totalReceived: this._totalReceived,
+          totalPlayed: this._totalPlayed,
+        });
       } else if (event.data && event.data.length > 0) {
         // 不依賴 instanceof（跨 realm 可能失敗）
         // 確保是 Float32Array；若不是則轉換

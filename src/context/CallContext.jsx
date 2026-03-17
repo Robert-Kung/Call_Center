@@ -34,11 +34,18 @@ export function CallProvider({ children }) {
   const [geminiTokenUsage, setGeminiTokenUsage] = useState({ input: 0, output: 0, total: 0 });
   const [geminiConnectionStatus, setGeminiConnectionStatus] = useState('disconnected');
   const [isStreaming, setIsStreaming] = useState(false);  // Gemini Live 即時串流中
+  const [pendingAutoHangup, setPendingAutoHangup] = useState(false); // 自動掛斷觸發旗標
   const [streamingAiText, setStreamingAiText] = useState('');    // AI 串流逐字稿（即時顯示）
   const [streamingUserText, setStreamingUserText] = useState(''); // 使用者語音轉錄（說話時即時顯示，turnComplete 後轉正式訊息）
 
   // 麥克風 MediaStream ref (用於 Gemini Live 串流)
   const mediaStreamRef = useRef(null);
+
+  // UX 回饋計時器 refs（長時間未偵測到語音的提示與自動掛斷）
+  const noSpeechTimerRef = useRef(null);     // 7秒：偵測不到聲音提示
+  const aiSlowTimerRef = useRef(null);       // 3秒：AI 處理中提示
+  const autoHangupTimerRef = useRef(null);   // 20秒：自動掛斷
+  const autoHangupTriggeredRef = useRef(false); // 是否已觸發自動掛斷
 
   // 延遲追蹤
   const [latencyMetrics, setLatencyMetrics] = useState({
@@ -424,14 +431,128 @@ export function CallProvider({ children }) {
       let pendingAudioChunks = 0;
       let turnComplete = false;
 
+      // 重置自動掛斷旗標（新通話開始時清除前次狀態）
+      autoHangupTriggeredRef.current = false;
+
+      // 記錄最近幾輪對話，用於重連後注入 context（client-side fallback）
+      let lastConversationContext = '';
+
+      // ---- 重連機制 ----
+      let reconnectAttempts = 0;
+      const MAX_RECONNECT = 3;
+
+      const attemptReconnect = async () => {
+        setConnectionStatus('reconnecting');
+        setGeminiConnectionStatus('reconnecting');
+
+        while (reconnectAttempts < MAX_RECONNECT) {
+          reconnectAttempts++;
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), 8000); // 1s, 2s, 4s
+          addLog(`連線中斷，${delay / 1000}秒後嘗試重新連線 (${reconnectAttempts}/${MAX_RECONNECT})...`, 'warning');
+
+          await new Promise(r => setTimeout(r, delay));
+
+          // 確認通話仍在進行中（hangUp 時 mediaStreamRef 會清空）
+          if (!mediaStreamRef.current) {
+            console.log('[CallContext] 重連已取消：通話已結束');
+            return;
+          }
+
+          try {
+            await geminiService.reconnect(mediaStreamRef.current);
+            reconnectAttempts = 0;
+            addLog('重新連線成功 ✓', 'success');
+            setConnectionStatus('connected');
+            setGeminiConnectionStatus('connected');
+            // 重置音訊播放狀態
+            pendingAudioChunks = 0;
+            turnComplete = false;
+            audioPlayer.stopPlayback();
+            // P4: 根據是否有 resumption handle 決定通知內容
+            // 有 handle：伺服器已自動恢復對話歷史，只需告知 AI 主動說明斷線情況
+            // 無 handle：全新 session，需附上完整對話摘要
+            if (geminiService._lastResumptionHandle) {
+              geminiService.sendSystemMessage(
+                '【系統通知：連線剛才短暫中斷後已恢復】請立即主動告知客戶連線已恢復，並簡短說明剛才討論到哪裡，然後繼續對話。不要等客戶先開口。'
+              );
+            } else if (lastConversationContext) {
+              geminiService.sendSystemMessage(
+                `【系統通知：連線中斷後重新建立】請立即主動告知客戶連線已恢復。以下是斷線前的對話摘要，請根據此摘要繼續服務客戶：\n${lastConversationContext}`
+              );
+            }
+            // P1: 移除此處的 startNoSpeechTimer()
+            // AI 若有回應，suppress 釋放後 tryReleaseSuppression() 會自動呼叫
+            // AI 若無回應（resumption handle 有效、靜默銜接），suppress 已重置，
+            // GeminiLiveService.reconnect() 完成後 _suppressInput=false，
+            // 使用者可立即說話，等待 inputTranscription 觸發 onUserSpeechDetected()
+            return; // 成功，退出
+          } catch (err) {
+            console.error('[CallContext] 重新連線失敗 (%d/%d):', reconnectAttempts, MAX_RECONNECT, err);
+            addLog(`重新連線失敗 (${reconnectAttempts}/${MAX_RECONNECT}): ${err.message}`, 'error');
+          }
+        }
+
+        // 達到最大重試次數，掛斷通話
+        addLog('無法重新連線，自動掛斷通話', 'error');
+        setConnectionStatus('disconnected');
+        setGeminiConnectionStatus('disconnected');
+      };
+
+      // ---- UX 回饋計時器輔助函式 ----
+
+      // 重置 20秒無語音自動掛斷計時器（每次使用者說話或 suppress 釋放時呼叫）
+      const resetAutoHangupTimer = () => {
+        if (autoHangupTimerRef.current) clearTimeout(autoHangupTimerRef.current);
+        autoHangupTimerRef.current = setTimeout(() => {
+          autoHangupTimerRef.current = null;
+          autoHangupTriggeredRef.current = true;
+          console.log('[CallContext] 20秒無使用者語音，觸發自動掛斷');
+          addLog('長時間未偵測到您的聲音，AI 將結束通話', 'warning');
+          geminiService.sendSystemMessage('【系統通知】已超過20秒未偵測到使用者聲音。請簡短感謝客戶來電，禮貌道別並結束通話。');
+          // 最多等 15 秒讓 AI 說完道別，再強制掛斷
+          setTimeout(() => setPendingAutoHangup(true), 15000);
+        }, 20000);
+      };
+
+      // suppress 釋放後啟動：7秒偵測不到聲音提示 + 重置 20秒計時器
+      const startNoSpeechTimer = () => {
+        if (noSpeechTimerRef.current) { clearTimeout(noSpeechTimerRef.current); noSpeechTimerRef.current = null; }
+        noSpeechTimerRef.current = setTimeout(() => {
+          noSpeechTimerRef.current = null;
+          addLog('偵測不到您的聲音，請確認麥克風是否正常', 'warning');
+        }, 7000);
+        resetAutoHangupTimer();
+      };
+
+      // inputTranscription 到達時：取消無聲音提示，啟動 3秒 AI 慢回應提示
+      const onUserSpeechDetected = () => {
+        if (autoHangupTriggeredRef.current) return; // 自動掛斷流程中不重置計時器
+        if (noSpeechTimerRef.current) { clearTimeout(noSpeechTimerRef.current); noSpeechTimerRef.current = null; }
+        if (aiSlowTimerRef.current) clearTimeout(aiSlowTimerRef.current);
+        aiSlowTimerRef.current = setTimeout(() => {
+          aiSlowTimerRef.current = null;
+          addLog('AI 正在處理中，請稍候...', 'info');
+        }, 3000);
+        resetAutoHangupTimer();
+      };
+
       const tryReleaseSuppression = () => {
         console.log('[Suppress] tryRelease: pendingChunks=%d, turnComplete=%s', pendingAudioChunks, turnComplete);
         if (pendingAudioChunks === 0 && turnComplete) {
           turnComplete = false; // 立即重置防止重複觸發
+          if (autoHangupTriggeredRef.current) {
+            // 自動掛斷模式：AI 道別音訊播完後掛斷，不重開麥克風
+            console.log('[CallContext] 自動掛斷：AI 道別播完，觸發掛斷');
+            setTimeout(() => setPendingAutoHangup(true), 500);
+            return;
+          }
           // 延遲一個 worklet chunk（256ms）再開麥克風：
           // 讓喇叭最後殘留的 AI 回音散掉，避免 worklet buffer 邊界的回音觸發 Gemini VAD
           console.log('[Suppress] 條件滿足，256ms 後釋放麥克風');
-          setTimeout(() => geminiService.setSuppressInput(false), 256);
+          setTimeout(() => {
+            geminiService.setSuppressInput(false);
+            startNoSpeechTimer();
+          }, 256);
         }
       };
 
@@ -442,11 +563,14 @@ export function CallProvider({ children }) {
         } else if (type === 'input') {
           // 使用者說話時即時更新轉錄，turnComplete 後由 displayedConversations 取代
           setStreamingUserText(prev => prev + text);
+          onUserSpeechDetected(); // 取消無聲音提示，啟動 AI 慢回應計時器
         }
       };
 
       // ---- 即時音訊串流 (逐 chunk 播放，不等 turnComplete) ----
       geminiService.onAudioChunk = (chunkBase64) => {
+        // AI 開始回應：取消「AI 慢回應」提示
+        if (aiSlowTimerRef.current) { clearTimeout(aiSlowTimerRef.current); aiSlowTimerRef.current = null; }
         pendingAudioChunks++;
         console.log('[Suppress] onAudioChunk 到達，pendingChunks=%d', pendingAudioChunks);
         // 第一個 chunk 到達時開始抑制麥克風（防止回音）
@@ -473,8 +597,8 @@ export function CallProvider({ children }) {
         setStreamingAiText('');
         setStreamingUserText('');
 
-        // 加入使用者語音轉文字
-        if (response.userText && response.userText.trim()) {
+        // 加入使用者語音轉文字（自動掛斷的系統訊息不顯示在 UI）
+        if (!autoHangupTriggeredRef.current && response.userText && response.userText.trim()) {
           setDisplayedConversations(prev => [...prev, {
             id: uid(),
             speaker: 'customer',
@@ -491,6 +615,15 @@ export function CallProvider({ children }) {
             text: response.aiText
           }]);
           addLog(`AI 回應: "${response.aiText.substring(0, 30)}..."`, 'ai');
+        }
+
+        // 更新最近對話 context（供重連後注入，client-side fallback）
+        if (response.userText || response.aiText) {
+          const lines = [];
+          if (response.userText?.trim()) lines.push(`客戶：${response.userText.trim()}`);
+          if (response.aiText?.trim()) lines.push(`AI：${response.aiText.trim().substring(0, 60)}`);
+          const prev = lastConversationContext ? lastConversationContext.split('\n') : [];
+          lastConversationContext = [...prev, ...lines].slice(-8).join('\n'); // 保留最近 4 輪
         }
 
         // 音訊已由 onAudioChunk 逐 chunk 播放，此處只處理 suppress 釋放時機
@@ -529,6 +662,8 @@ export function CallProvider({ children }) {
         pendingAudioChunks = 0;
         turnComplete = false;
         geminiService.setSuppressInput(false);
+        // 清除 AI 慢回應計時器（使用者已打斷）
+        if (aiSlowTimerRef.current) { clearTimeout(aiSlowTimerRef.current); aiSlowTimerRef.current = null; }
         addLog('AI 回應被中斷', 'info');
       };
 
@@ -541,10 +676,20 @@ export function CallProvider({ children }) {
       geminiService.onConnectionChange = (status) => {
         console.log('[CallContext] Gemini 連線狀態:', status);
         setGeminiConnectionStatus(status);
-        // 同步更新 connectionStatus，讓自動掛斷 useEffect 能偵測到斷線
-        setConnectionStatus(status);
-        if (status === 'disconnected' && callState === 'connected') {
-          addLog('Gemini Live 連線中斷', 'warning');
+        if (status === 'disconnected' && !autoHangupTriggeredRef.current) {
+          // 意外斷線：立即設為 'reconnecting'（阻止 auto-hangup useEffect），然後嘗試重連
+          addLog('Gemini Live 連線中斷，嘗試重新連線...', 'warning');
+          attemptReconnect();
+        } else {
+          setConnectionStatus(status);
+        }
+      };
+
+      geminiService.onGoAway = (secondsLeft) => {
+        addLog(`伺服器連線即將重置 (剩餘約 ${secondsLeft} 秒)，提前重連中...`, 'warning');
+        // P3: 利用 GoAway 預警時間提前重連，避免等到真正斷線才被動處理
+        if (!autoHangupTriggeredRef.current) {
+          attemptReconnect();
         }
       };
 
@@ -569,9 +714,24 @@ export function CallProvider({ children }) {
           const rawFlagTypes = args.flagTypes || [];
           const flagTypes = flags.map((_, i) => rawFlagTypes[i] || 'info');
 
+          // intent 缺漏時，嘗試從 entities 推斷（模型偶爾省略 intent 但把意圖寫進 entities）
+          const INTENT_ENUM = [
+            '問候', '結束通話', '提供資訊', '身份確認', '常見問題',
+            '報修申訴', '費用查詢', '方案諮詢',
+            '訂位', '訂位查詢', '訂位取消',
+            '掛號', '取消掛號', '看診進度查詢',
+            '貨件追蹤', '修改配送', '寄件諮詢'
+          ];
+          let resolvedIntent = args.intent;
+          if (!resolvedIntent) {
+            // 從 entities 裡的「意圖:xxx」或「需求:xxx」標籤中找符合 enum 的值
+            const entityHint = (args.entities || []).join(' ');
+            resolvedIntent = INTENT_ENUM.find(label => entityHint.includes(label)) || '提供資訊';
+          }
+
           // 更新 AI 意圖分析面板
           const analysis = {
-            intent: args.intent || '未知',
+            intent: resolvedIntent,
             confidence: args.confidence || 0,
             entities,
             flags,
@@ -724,6 +884,12 @@ export function CallProvider({ children }) {
     // 停止所有進行中的音訊操作
     audioPlayer.stopPlayback();
 
+    // 清除 UX 回饋計時器，防止掛斷後繼續觸發
+    if (noSpeechTimerRef.current) { clearTimeout(noSpeechTimerRef.current); noSpeechTimerRef.current = null; }
+    if (aiSlowTimerRef.current) { clearTimeout(aiSlowTimerRef.current); aiSlowTimerRef.current = null; }
+    if (autoHangupTimerRef.current) { clearTimeout(autoHangupTimerRef.current); autoHangupTimerRef.current = null; }
+    autoHangupTriggeredRef.current = false;
+
     // 停止即時串流 (Gemini 或 REST WS)
     if (isStreaming) {
       if (voiceMode === 'gemini-live') {
@@ -757,6 +923,7 @@ export function CallProvider({ children }) {
       geminiService.onError = null;
       geminiService.onConnectionChange = null;
       geminiService.onToolCall = null;
+      geminiService.onGoAway = null;
       setStreamingAiText('');
       setStreamingUserText('');
       voiceServiceRef.current.endGeminiSession();
@@ -790,6 +957,14 @@ export function CallProvider({ children }) {
     }
   }, [voiceMode, sessionId, isStreaming, audioPlayer, addLog, formatDuration, callDuration, displayedConversations.length, tickets.length, geminiTokenUsage.total]);
 
+  // 自動掛斷觸發：AI 道別播完後執行 hangUp
+  useEffect(() => {
+    if (pendingAutoHangup && callState === 'connected') {
+      setPendingAutoHangup(false);
+      hangUp();
+    }
+  }, [pendingAutoHangup, callState, hangUp]);
+
   // 伺服器端斷線自動掛斷
   // 當 live 模式通話中 connectionStatus 變為 disconnected/error 時自動觸發 hangUp，
   // 避免畫面卡在通話中但 WebSocket 已實際斷線的狀態。
@@ -798,6 +973,7 @@ export function CallProvider({ children }) {
   useEffect(() => {
     if (voiceMode === 'mock') return;
     if (callState !== 'connected' && callState !== 'dialing') return;
+    if (connectionStatus === 'reconnecting') return; // 重連中，不觸發掛斷
     if (connectionStatus === 'disconnected' || connectionStatus === 'error') {
       addLog('連線中斷，自動掛斷通話', 'warning');
       hangUp();
