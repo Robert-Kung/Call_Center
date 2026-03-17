@@ -31,7 +31,6 @@ Call_Center/
 │  │  │  ├─ audioCapture.worklet.js   # 麥克風採集 Worklet（128-sample 累積 → 降採樣 → Int16）
 │  │  │  └─ pcmPlayback.worklet.js    # PCM 無縫播放 Worklet（gapless，24kHz Float32 佇列）
 │  │  ├─ hooks/
-│  │  │  ├─ useAudioRecorder.js      # 錄音 Hook（16kHz mono）
 │  │  │  └─ useAudioPlayer.js        # 播放 Hook（直接處理 PCM，透過 pcmPlayback worklet）
 │  │  ├─ data/
 │  │  │  └─ scenarios.js             # Mock 對話腳本（3 場景）

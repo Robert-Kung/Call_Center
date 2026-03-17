@@ -11,7 +11,11 @@
       "Bash(npm install:*)",
       "Bash(timeout 5 node:*)",
       "Bash(curl:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "WebFetch(domain:discuss.ai.google.dev)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)"
     ],
     "additionalDirectories": [
       "/home/user/Call_Center /src/views"
