@@ -1,9 +1,10 @@
-import React from 'react';
-import { Brain, Target, Tag, AlertTriangle, CheckCircle, XCircle, Info } from 'lucide-react';
+import React, { useState } from 'react';
+import { Brain, Target, Tag, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronUp } from 'lucide-react';
 import { useCall } from '../context/CallContext';
 
 export default function AnalysisPanel() {
   const { currentAnalysis, callState } = useCall();
+  const [collapsed, setCollapsed] = useState(false);
 
   const getFlagIcon = (flagType) => {
     switch (flagType) {
@@ -32,20 +33,30 @@ export default function AnalysisPanel() {
   };
 
   return (
-    <div className="h-full flex flex-col bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-700/50 overflow-hidden">
+    <div className="flex flex-col bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-700/50 overflow-hidden">
       {/* 標題列 */}
-      <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2 bg-slate-800/80">
-        <div className="w-8 h-8 bg-purple-500/20 rounded-lg flex items-center justify-center">
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2 bg-slate-800/80 w-full text-left hover:bg-slate-700/40 transition-colors"
+      >
+        <div className="w-8 h-8 bg-purple-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
           <Brain className="w-4 h-4 text-purple-400" />
         </div>
-        <div>
+        <div className="flex-1">
           <h2 className="font-semibold text-white text-sm">AI 意圖分析</h2>
           <p className="text-xs text-slate-400">Intent Recognition</p>
         </div>
-      </div>
+        {currentAnalysis && !collapsed && (
+          <span className="text-xs text-purple-300 font-medium mr-2">{currentAnalysis.intent}</span>
+        )}
+        {collapsed
+          ? <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+          : <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" />}
+      </button>
 
       {/* 內容區 */}
-      <div className="flex-1 overflow-y-auto p-4">
+      {!collapsed && (
+      <div className="p-4">
         {currentAnalysis ? (
           <div className="space-y-4">
             {/* 意圖識別 */}
@@ -122,14 +133,15 @@ export default function AnalysisPanel() {
             )}
           </div>
         ) : (
-          <div className="h-full flex flex-col items-center justify-center text-slate-500">
-            <Brain className="w-12 h-12 mb-3 opacity-30" />
+          <div className="py-6 flex flex-col items-center justify-center text-slate-500">
+            <Brain className="w-10 h-10 mb-2 opacity-30" />
             <p className="text-sm">
               {callState === 'connected' ? '等待客戶發話...' : '等待通話開始...'}
             </p>
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

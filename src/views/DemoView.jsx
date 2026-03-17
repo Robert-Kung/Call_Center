@@ -102,17 +102,17 @@ export default function DemoView() {
             </div>
 
             {/* 右欄 */}
-            <div className="flex flex-col gap-4 overflow-hidden">
+            <div className="flex flex-col gap-4 overflow-y-auto pr-1">
               {/* 意圖分析（Mock / Gemini Live 才有 function call） */}
               {showFunctionCallPanels && (
-                <div className="h-[240px] flex-shrink-0">
+                <div className="flex-shrink-0">
                   <AnalysisPanel />
                 </div>
               )}
 
               {/* 產生單據（Mock / Gemini Live 才有 function call） */}
               {showFunctionCallPanels && (
-                <div className="flex-1 min-h-0">
+                <div className="flex-shrink-0">
                   <TicketPanel />
                 </div>
               )}
