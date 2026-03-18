@@ -645,7 +645,10 @@ class GeminiLiveService {
             prefixPaddingMs: GEMINI_CONFIG.vad.prefixPaddingMs,
             endOfSpeechSensitivity: GEMINI_CONFIG.vad.endOfSpeechSensitivity,
             startOfSpeechSensitivity: GEMINI_CONFIG.vad.startOfSpeechSensitivity
-          }
+          },
+          // 展場降噪：僅保留有語音活動的片段，排除靜音與背景噪音段
+          activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
+          turnCoverage: GEMINI_CONFIG.turnCoverage
         },
         // Context Window Compression：避免 15 分鐘硬性截止，使用滑動視窗壓縮舊脈絡
         contextWindowCompression: { slidingWindow: {} },

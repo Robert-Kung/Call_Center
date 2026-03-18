@@ -15,7 +15,12 @@
       "WebFetch(domain:discuss.ai.google.dev)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "Bash(find /home/user/Call_Center -type f -name README* -o -name STRUCTURE* -o -name ARCHITECTURE*)",
+      "Bash(find '/home/user/Call_Center ' -name *audio* -o -name *voice* -o -name *worklet*)",
+      "WebSearch",
+      "WebFetch(domain:docs.cloud.google.com)",
+      "WebFetch(domain:firebase.google.com)"
     ],
     "additionalDirectories": [
       "/home/user/Call_Center /src/views"
