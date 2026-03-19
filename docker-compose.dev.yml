@@ -1,14 +1,15 @@
 services:
-  ai-voice-assistant-dev:
+  callcenter-app:
     build:
       context: .
       dockerfile: Dockerfile
       target: build
-    container_name: ai-voice-assistant-dev
+    container_name: callcenter-app
     ports:
       - "3100:3100"
     volumes:
       - ./src:/app/src
+      - ./public:/app/public
       - ./index.html:/app/index.html
       - ./vite.config.js:/app/vite.config.js
       - ./tailwind.config.js:/app/tailwind.config.js
@@ -19,17 +20,20 @@ services:
       - .env
     environment:
       - NODE_ENV=development
-      # 告訴 Vite proxy 轉發到 Docker 內部的 token-server service
-      - TOKEN_SERVER_HOST=token-server
+      - PORT=3100
+      # Token Server: 容器內透過 host.docker.internal 存取宿主機上的 token-server
+      - TOKEN_SERVER_HOST=host.docker.internal
       - TOKEN_SERVER_PORT=3005
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["npm", "run", "dev"]
     restart: unless-stopped
     depends_on:
-      - token-server
+      - callcenter-token
 
-  token-server:
+  callcenter-token:
     image: node:20-alpine
-    container_name: gemini-token-server
+    container_name: callcenter-token
     working_dir: /app
     ports:
       - "3005:3005"

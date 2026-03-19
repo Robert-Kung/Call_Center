@@ -9,3 +9,18 @@ services:
     environment:
       - NODE_ENV=production
     restart: unless-stopped
+    depends_on:
+      - token-server
+
+  token-server:
+    image: node:20-alpine
+    container_name: gemini-token-server
+    working_dir: /app
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./token-server:/app
+    env_file:
+      - ./token-server/.env
+    command: sh -c "npm install && npm start"
+    restart: unless-stopped

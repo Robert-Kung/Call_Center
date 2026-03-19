@@ -20,7 +20,11 @@
       "Bash(find '/home/user/Call_Center ' -name *audio* -o -name *voice* -o -name *worklet*)",
       "WebSearch",
       "WebFetch(domain:docs.cloud.google.com)",
-      "WebFetch(domain:firebase.google.com)"
+      "WebFetch(domain:firebase.google.com)",
+      "Bash(docker ps:*)",
+      "Bash(docker exec:*)",
+      "Bash(mkdir -p \"/home/user/Call_Center /public\")",
+      "Bash(cp \"/home/user/Call_Center /node_modules/@jitsi/rnnoise-wasm/dist/rnnoise.wasm\" \"/home/user/Call_Center /public/rnnoise.wasm\")"
     ],
     "additionalDirectories": [
       "/home/user/Call_Center /src/views"

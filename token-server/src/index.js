@@ -6,7 +6,9 @@ const { GoogleGenAI } = require('@google/genai');
 const app = express();
 const PORT = process.env.PORT || 3005;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'http://localhost:3100';
+// 支援逗號分隔的多個 origin，例如：http://localhost:3100,http://localhost:5173
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGIN || 'http://localhost:3100')
+  .split(',').map(o => o.trim());
 
 // 初始化 Gemini 客戶端（使用 v1alpha，ephemeral token 只在此版本支援）
 let genaiClient;
@@ -18,7 +20,7 @@ if (GEMINI_API_KEY) {
 }
 
 app.use(cors({
-  origin: ALLOWED_ORIGIN,
+  origin: ALLOWED_ORIGINS.length === 1 ? ALLOWED_ORIGINS[0] : ALLOWED_ORIGINS,
   methods: ['POST', 'GET'],
 }));
 app.use(express.json());
@@ -81,7 +83,7 @@ app.post('/api/gemini-token', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`[TokenServer] Gemini Token Server 啟動於 port ${PORT}`);
-  console.log(`[TokenServer] 允許來源: ${ALLOWED_ORIGIN}`);
+  console.log(`[TokenServer] 允許來源: ${ALLOWED_ORIGINS.join(', ')}`);
   if (!GEMINI_API_KEY) {
     console.warn('[TokenServer] ⚠️  GEMINI_API_KEY 未設定，請建立 .env 檔案');
   }

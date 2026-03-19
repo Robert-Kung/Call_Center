@@ -255,16 +255,11 @@ export const GEMINI_CONFIG = {
   // VAD 設定 (Gemini 伺服器端語音活動偵測)
   // 對應 setup 訊息的 realtimeInputConfig.automaticActivityDetection
   vad: {
-    silenceDurationMs: 800,            // 靜音持續幾ms才判定說完 (Google default ≈ 600ms，調高避免話中停頓誤觸發)
+    silenceDurationMs: 1000,            // 靜音持續幾ms才判定說完 (Google default ≈ 600ms，調高避免話中停頓誤觸發)
     prefixPaddingMs: 200,               // 語音開始前的預留時間
-    endOfSpeechSensitivity: 'END_SENSITIVITY_NORMAL',   // 降低靈敏度：停頓要更明顯才算說完
-    startOfSpeechSensitivity: 'START_SENSITIVITY_NORMAL' // 高靈敏度：快速偵測語音開始，減少輸入延遲（LOW 會導致 10+ 秒才識別到說話）
-  },
-
-  // 展場環境降噪 — turnCoverage
-  // TURN_INCLUDES_ONLY_ACTIVITY: 僅保留有語音活動的片段，排除靜音與噪音段送入 context
-  // 注意：proactiveAudio 目前 API 尚未支援（會報 Unknown field 錯誤）
-  turnCoverage: 'TURN_INCLUDES_ONLY_ACTIVITY'
+    endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',   // 降低靈敏度：停頓要更明顯才算說完
+    startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH' // 高靈敏度：快速偵測語音開始，減少輸入延遲（LOW 會導致 10+ 秒才識別到說話）
+  }
 };
 
 // Gemini Live 系統提示
