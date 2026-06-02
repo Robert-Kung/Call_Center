@@ -314,7 +314,8 @@ export const GEMINI_SYSTEM_PROMPTS = {
    「客戶滿意」(success)：客戶表達滿意感謝
    「資訊不完整」(warning)：客戶提供資訊有缺漏
    「非本人來電」(warning)：來電者非帳戶本人
-   「資訊已確認」(info)：客戶確認了提供的資訊`,
+   「資訊已確認」(info)：客戶確認了提供的資訊
+7. generate_summary 觸發：每 2-3 輪客戶對話後，主動呼叫 generate_summary 更新通話摘要。摘要用50字以內描述客戶需求與目前處理進度。nextAction 填寫建議值機人員下一步的回應方向。`,
 
   reservation: `你是餐廳AI訂位助理。
 
@@ -356,7 +357,8 @@ export const GEMINI_SYSTEM_PROMPTS = {
 5. 自然語音：呼叫工具的同時繼續正常語音回覆客戶，不提及工具操作。
 6. 口語轉換：客戶說「六點」、「傍晚六點半」等口語時，主動轉換為 HH:MM 格式（如 18:00、18:30）並向客戶確認後再記錄。
 7. 情緒標記：只使用以下標準 flags（無則填 []，禁止填 ["無"]）：
-   「情緒激動」(error)、「客戶急迫」(warning)、「情緒已緩和」(success)、「客戶滿意」(success)、「資訊不完整」(warning)、「資訊已確認」(info)`,
+   「情緒激動」(error)、「客戶急迫」(warning)、「情緒已緩和」(success)、「客戶滿意」(success)、「資訊不完整」(warning)、「資訊已確認」(info)
+8. generate_summary 觸發：每 2-3 輪客戶對話後，主動呼叫 generate_summary 更新通話摘要。`,
 
   medical: `你是醫院AI醫療助理。
 
@@ -399,7 +401,8 @@ export const GEMINI_SYSTEM_PROMPTS = {
 5. 自然語音：呼叫工具的同時繼續正常語音回覆客戶，不提及工具操作。
 6. 口語轉換：客戶說「早上十點」、「下午兩點半」等口語時，主動轉換為 HH:MM 格式（如 10:00、14:30）並向客戶確認後再記錄。
 7. 情緒標記：只使用以下標準 flags（無則填 []，禁止填 ["無"]）：
-   「情緒激動」(error)、「客戶急迫」(warning)、「情緒已緩和」(success)、「客戶滿意」(success)、「資訊不完整」(warning)、「資訊已確認」(info)`,
+   「情緒激動」(error)、「客戶急迫」(warning)、「情緒已緩和」(success)、「客戶滿意」(success)、「資訊不完整」(warning)、「資訊已確認」(info)
+8. generate_summary 觸發：每 2-3 輪客戶對話後，主動呼叫 generate_summary 更新通話摘要。`,
 
   logistics: `你是物流AI助理。
 
@@ -437,7 +440,8 @@ export const GEMINI_SYSTEM_PROMPTS = {
 4. create_ticket 觸發：當客戶要求修改地址並通過身分驗證，或反映包裹遺失/損壞時，立即呼叫 create_ticket 建立「物流處理單」。不必等所有資訊完整，未知欄位填空字串。
 5. 自然語音：呼叫工具的同時繼續正常語音回覆客戶，不提及工具操作。
 6. 情緒標記：只使用以下標準 flags（無則填 []，禁止填 ["無"]）：
-   「情緒激動」(error)、「客戶急迫」(warning)、「情緒已緩和」(success)、「客戶滿意」(success)、「資訊不完整」(warning)、「資訊已確認」(info)`
+   「情緒激動」(error)、「客戶急迫」(warning)、「情緒已緩和」(success)、「客戶滿意」(success)、「資訊不完整」(warning)、「資訊已確認」(info)
+7. generate_summary 觸發：每 2-3 輪客戶對話後，主動呼叫 generate_summary 更新通話摘要。`
 };
 
 // ==================== Gemini Function Calling Tool Declarations ====================
@@ -531,6 +535,42 @@ export const GEMINI_TOOL_DECLARATIONS = [
         }
       },
       required: ['type', 'summary']
+    }
+  },
+  {
+    name: 'generate_summary',
+    description: '生成目前通話的即時摘要。每 2-3 輪客戶對話後主動呼叫一次，摘要包含客戶主要需求、情緒狀態、已完成步驟、建議下一步行動。',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        summary: {
+          type: 'STRING',
+          description: '50字以內的通話摘要，描述客戶來電目的與目前處理狀態'
+        },
+        customerName: {
+          type: 'STRING',
+          description: '客戶姓名，如未提供則留空字串'
+        },
+        mainIssue: {
+          type: 'STRING',
+          description: '客戶的主要問題或需求，例如「網路斷線報修」'
+        },
+        emotionState: {
+          type: 'STRING',
+          description: '客戶目前情緒狀態',
+          enum: ['positive', 'neutral', 'frustrated', 'angry']
+        },
+        completedSteps: {
+          type: 'ARRAY',
+          items: { type: 'STRING' },
+          description: '本次通話已完成的處理步驟清單'
+        },
+        nextAction: {
+          type: 'STRING',
+          description: '建議值機人員的下一步行動或建議回應方向'
+        }
+      },
+      required: ['summary', 'mainIssue', 'emotionState']
     }
   }
 ];

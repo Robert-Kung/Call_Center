@@ -38,6 +38,12 @@ export function CallProvider({ children }) {
   const [streamingAiText, setStreamingAiText] = useState('');    // AI 串流逐字稿（即時顯示）
   const [streamingUserText, setStreamingUserText] = useState(''); // 使用者語音轉錄（說話時即時顯示，turnComplete 後轉正式訊息）
 
+  // Agent Copilot 狀態
+  const [currentSummary, setCurrentSummary] = useState(null);        // { summary, mainIssue, emotionState, completedSteps, nextAction, customerName }
+  const [suggestedResponse, setSuggestedResponse] = useState('');    // 建議回應文字
+  const [handoffPackage, setHandoffPackage] = useState(null);        // 轉接交接包
+  const [isHandoffMode, setIsHandoffMode] = useState(false);         // 是否正在轉接
+
   // 麥克風 MediaStream ref (用於 Gemini Live 串流)
   const mediaStreamRef = useRef(null);
 
@@ -141,6 +147,10 @@ export function CallProvider({ children }) {
     setIsStreaming(false);
     setIsProcessing(false);
     setError(null);
+    setCurrentSummary(null);
+    setSuggestedResponse('');
+    setHandoffPackage(null);
+    setIsHandoffMode(false);
   }, []);
 
   // Mock 模式撥號
@@ -799,6 +809,21 @@ export function CallProvider({ children }) {
           };
         }
 
+        if (name === 'generate_summary') {
+          const summary = {
+            summary: args.summary || '',
+            mainIssue: args.mainIssue || '',
+            emotionState: args.emotionState || 'neutral',
+            completedSteps: args.completedSteps || [],
+            nextAction: args.nextAction || '',
+            customerName: args.customerName || ''
+          };
+          setCurrentSummary(summary);
+          if (args.nextAction) setSuggestedResponse(args.nextAction);
+          addLog(`📋 摘要更新: ${summary.summary.substring(0, 40)}...`, 'ai');
+          return { result: 'success' };
+        }
+
         // 未知的 function — 仍回傳結果避免 Gemini 卡住
         console.warn('[CallContext] 未知的 tool call:', name);
         return { result: 'error', error: `Unknown function: ${name}` };
@@ -1019,6 +1044,14 @@ export function CallProvider({ children }) {
       }
     }
 
+    // 處理 Agent Copilot 摘要（Mock 模式）
+    if (conv.summary) {
+      setCurrentSummary(conv.summary);
+    }
+    if (conv.suggestedResponse) {
+      setSuggestedResponse(conv.suggestedResponse);
+    }
+
     // 處理動作
     if (conv.action) {
       handleAction(conv.action);
@@ -1191,6 +1224,10 @@ export function CallProvider({ children }) {
     setGeminiConnectionStatus('disconnected');
     setGeminiTokenUsage({ input: 0, output: 0, total: 0 });
     setError(null);
+    setCurrentSummary(null);
+    setSuggestedResponse('');
+    setHandoffPackage(null);
+    setIsHandoffMode(false);
   }, [voiceMode, sessionId, isStreaming]);
 
   // 切換靜音
@@ -1218,6 +1255,49 @@ export function CallProvider({ children }) {
   const clearError = useCallback(() => {
     setError(null);
   }, []);
+
+  // 生成轉接交接包
+  const generateHandoff = useCallback(() => {
+    const pkg = {
+      handoffTime: new Date().toISOString(),
+      duration: formatDuration(callDuration),
+      customer: {},
+      intent: currentAnalysis?.intent || '未知',
+      summary: currentSummary?.summary || `通話時長 ${formatDuration(callDuration)}，共 ${displayedConversations.length} 輪對話`,
+      entities: currentAnalysis?.entities || [],
+      flags: currentAnalysis?.flags || [],
+      conversationCount: displayedConversations.length,
+      suggestedAction: currentSummary?.nextAction || suggestedResponse || ''
+    };
+    // 從 entities 解析客戶資料
+    if (currentAnalysis?.entities) {
+      currentAnalysis.entities.forEach(e => {
+        const [key, val] = e.split(':');
+        if (key && val) {
+          if (key.includes('戶名') || key.includes('姓名')) pkg.customer.name = val;
+          if (key.includes('門號') || key.includes('電話')) pkg.customer.phone = val;
+          if (key.includes('關係')) pkg.customer.relation = val;
+        }
+      });
+    }
+    if (currentSummary?.customerName) pkg.customer.name = currentSummary.customerName;
+    setHandoffPackage(pkg);
+    setIsHandoffMode(true);
+    addLog('📤 生成轉接交接包', 'system');
+  }, [callDuration, currentAnalysis, currentSummary, displayedConversations.length, suggestedResponse, formatDuration, addLog]);
+
+  // 取消轉接
+  const cancelHandoff = useCallback(() => {
+    setIsHandoffMode(false);
+    setHandoffPackage(null);
+  }, []);
+
+  // 確認轉接（結束通話）
+  const confirmHandoff = useCallback(() => {
+    addLog('✓ 已確認轉接，通話結束', 'success');
+    setIsHandoffMode(false);
+    hangUp();
+  }, [hangUp, addLog]);
 
   const value = {
     // 狀態
@@ -1248,6 +1328,12 @@ export function CallProvider({ children }) {
     streamingAiText,
     streamingUserText,
 
+    // Agent Copilot 狀態
+    currentSummary,
+    suggestedResponse,
+    handoffPackage,
+    isHandoffMode,
+
     // 播放狀態
     isPlaying: audioPlayer.isPlaying,
 
@@ -1265,6 +1351,11 @@ export function CallProvider({ children }) {
     // 模式相關方法
     switchMode,
     clearError,
+
+    // Agent Copilot 方法
+    generateHandoff,
+    cancelHandoff,
+    confirmHandoff,
 
     // 播放相關方法
     stopPlayback: audioPlayer.stopPlayback
