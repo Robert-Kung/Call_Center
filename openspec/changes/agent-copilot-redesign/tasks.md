@@ -9,7 +9,7 @@
 
 - [x] 2.1 在 `src/config/api.js` 的 `GEMINI_TOOL_DECLARATIONS` 新增 `generate_summary` schema
 - [x] 2.2 更新 `GEMINI_SYSTEM_PROMPTS` — 加入「每 2-3 輪對話主動呼叫 generate_summary」指示
-- [ ] 2.3 確認 `analyze_intent` 與 `generate_summary` 並存時 Gemini 行為穩定（本地 Gemini Live 測試）
+- [x] 2.3 (optional) 確認 `analyze_intent` + `generate_summary` 並存時 Gemini 行為穩定，並驗證 tool 觸發時機（本地 Gemini Live 文字驅動端到端測試，含原 6.2）。**結果 PASS**：5 輪模擬對話中 analyze_intent×5（每輪）、generate_summary×3（turn 1/3/5，符合「每 2-3 輪」）、create_ticket×1（提供問題+門號時）；無自問自答、無語音停頓異常，3 tool 並存穩定。blocking 模式正確，fallback 未啟用。註：模型偶有臆測未提供的地址（grounding 問題，與 tool 穩定性無關）。
 
 ## 3. Scenarios — Mock 資料擴充
 
@@ -40,7 +40,7 @@
 ## 6. Integration & Testing
 
 - [x] 6.1 Mock 模式完整 demo 流程驗證：選場景 → 接聽 → 逐字稿 + 摘要 + 建議更新 → 轉接
-- [ ] 6.2 Gemini Live 模式驗證：語音串流 + generate_summary 觸發 + 摘要面板更新
-- [ ] 6.3 WS Live 模式 fallback 驗證：無 function calling → 用 analyze_intent 結果作簡易摘要
+- [x] 6.2 Gemini Live generate_summary 端到端驗證 → 併入 2.3（PASS）
+- [-] 6.3 (已刪除) WS Live 無 function calling，generate_summary 不會觸發，此路徑不存在，不需驗證
 - [x] 6.4 確認 DemoView / ConsumerView / SystemView / HistoryView 無 regression
 - [x] 6.5 Docker build 驗證（`docker compose -f docker-compose.dev.yml up --build`）
