@@ -4,20 +4,20 @@ import { Phone, PhoneOff, Mic, MicOff, User, Building2, UtensilsCrossed, Hotel, 
 // 預設對話腳本
 const scenarios = {
   telecom: {
-    name: '中華電信',
+    name: '星訊電信',
     icon: Building2,
     color: 'bg-blue-500',
     accentColor: 'text-blue-500',
     bgLight: 'bg-blue-50',
     companyInfo: {
-      name: '中華電信股份有限公司',
+      name: '星訊電信股份有限公司',
       service: '24小時客服專線',
       number: '0800-080-090'
     },
     conversations: [
       {
         speaker: 'customer',
-        text: '喂！你們中華電信是怎麼回事啊？我家網路一直斷一直斷，已經好幾天了，我在家上班欸，這樣我怎麼工作！',
+        text: '喂！你們星訊電信是怎麼回事啊？我家網路一直斷一直斷，已經好幾天了，我在家上班欸，這樣我怎麼工作！',
         analysis: { 
           intent: '報修申訴（情緒激動）', 
           confidence: 0.91, 
@@ -138,7 +138,7 @@ const scenarios = {
       },
       {
         speaker: 'ai',
-        text: '好的，幫您安排週四1月15日下午2點到5點。關於費用，如果是中華電信線路或設備本身的問題，檢修是免費的。但如果是用戶端的設備，例如您自己的路由器或網路線問題，可能會酌收材料費。工程師現場檢查後會先告知再處理，您不用擔心。',
+        text: '好的，幫您安排週四1月15日下午2點到5點。關於費用，如果是星訊電信線路或設備本身的問題，檢修是免費的。但如果是用戶端的設備，例如您自己的路由器或網路線問題，可能會酌收材料費。工程師現場檢查後會先告知再處理，您不用擔心。',
         analysis: null,
         action: { type: 'log', message: '費用說明: 線路問題免費，用戶端設備另計' }
       },

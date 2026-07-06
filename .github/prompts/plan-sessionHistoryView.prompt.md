@@ -150,7 +150,7 @@ Import `HistoryView` 和 lucide-react `History` icon。
 {
   "sessionId": "gemini-mmac35cb-8rwngz2",
   "scenarioId": "telecom",
-  "scenarioName": "中華電信",
+  "scenarioName": "星訊電信",
   "startTime": "2026-03-03T08:16:25.909Z",
   "endTime": "2026-03-03T08:17:09.000Z",
   "events": [
